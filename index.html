@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pool prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* VOICE: a pool hall at night, quiet and focused on the table
+   IDEA: the table under a single hanging lamp
+   PICTURE: the 3D table itself, filling the screen
+   COLOUR and TYPE: charcoal room, felt green, wood rail, brass accent; Barlow Condensed + Barlow
+   LAYOUT: slim header, table fills the middle, power + shot report along the bottom */
+:root{color-scheme:dark;--bg:#12100e;--panel:#1b1815;--ink:#efe9e1;--dim:#a89f94;--brass:#d9a441;--felt:#1d6e4c;--line:#2c2722}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Barlow,system-ui,sans-serif;display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+header,footer{display:flex;align-items:center;gap:12px 20px;flex-wrap:wrap;padding:10px max(3vw,14px);background:var(--panel);border-color:var(--line);border-style:solid;border-width:0}
+header{border-bottom-width:1px}footer{border-top-width:1px}
+h1{font:700 24px/1.05 "Barlow Condensed",sans-serif;margin:0;letter-spacing:.01em}
+h1 span{color:var(--dim);font-weight:600}
+.grow{flex:1}
+button{font:600 16px "Barlow Condensed",sans-serif;color:var(--ink);background:#2a2520;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 16px;cursor:pointer}
+button:hover{background:#342d27}button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+button[aria-pressed=true]{border-color:var(--brass);color:var(--brass)}
+.sel{display:flex;align-items:center;gap:8px;font:600 15px "Barlow Condensed",sans-serif;color:var(--dim)}
+select{font:600 16px "Barlow Condensed",sans-serif;color:var(--ink);background:#2a2520;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 10px}
+select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+#stage{position:relative;flex:1;touch-action:none;cursor:crosshair}
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#banner{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:rgba(18,16,14,.86);padding:7px 16px;border-radius:8px;pointer-events:none;text-align:center;max-width:94%;display:flex;flex-direction:column;gap:1px}
+#turnText{font:700 18px/1.2 "Barlow Condensed",sans-serif;color:var(--ink);letter-spacing:.01em}
+#turnText em{font-style:normal;color:var(--brass)}
+#hint{font-size:13px;color:var(--dim)}
+#over{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,8,7,.55)}
+#spinBox{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;align-items:center;gap:6px;touch-action:none}
+#spinBox[hidden]{display:none}
+#spinBall{position:relative;width:96px;height:96px;border-radius:50%;cursor:crosshair;
+  background:radial-gradient(circle at 38% 32%,#fff 0,#f1ece2 38%,#cfc6b6 78%,#9d9384 100%);
+  box-shadow:0 6px 18px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.15)}
+#spinBall::before,#spinBall::after{content:"";position:absolute;background:rgba(0,0,0,.14)}
+#spinBall::before{left:50%;top:12%;bottom:12%;width:1px}
+#spinBall::after{top:50%;left:12%;right:12%;height:1px}
+#spinBall:focus-visible{outline:2px solid var(--brass);outline-offset:3px}
+#spinDot{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;left:50%;top:50%;
+  background:#c4161c;box-shadow:0 0 0 2px rgba(255,255,255,.85),0 1px 3px rgba(0,0,0,.5);pointer-events:none}
+#spinLabel{font:600 14px "Barlow Condensed",sans-serif;color:var(--ink);background:rgba(18,16,14,.86);padding:2px 10px;border-radius:10px}
+@media(max-width:600px){#spinBall{width:76px;height:76px}#spinBox{right:10px;bottom:10px}}
+#over[hidden]{display:none}
+.card{background:var(--panel);border:1px solid #3d352d;border-radius:12px;padding:26px 30px;text-align:center;max-width:min(420px,90%);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.card h2{font:700 36px/1.05 "Barlow Condensed",sans-serif;margin:0 0 8px;text-wrap:balance}
+.card p{margin:0 0 10px;color:var(--dim)}
+.card .score{font:600 20px "Barlow Condensed",sans-serif;color:var(--ink);margin-bottom:18px}
+#nextBtn{border-color:var(--brass);color:var(--brass)}
+#report.foul strong{color:#ef8a6d}
+#players{display:flex;gap:8px;flex-wrap:wrap}
+#players[hidden]{display:none}
+.pl{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 8px;border:1px solid #3d352d;border-radius:22px;font:600 15px "Barlow Condensed",sans-serif;color:var(--dim);white-space:nowrap}
+.pl.on{border-color:var(--brass);color:var(--ink);background:#2a2520}
+.pl i{width:16px;height:16px;border-radius:50%;background:repeating-linear-gradient(90deg,#c4161c 0 50%,#f6c419 50% 100%);box-shadow:inset -2px -2px 3px rgba(0,0,0,.35)}
+.pl small{font:500 13px Barlow,sans-serif;color:var(--dim)}
+.pl .fr{color:var(--brass);font-size:17px}
+.power{display:flex;align-items:center;gap:10px}
+.power b{font:600 15px "Barlow Condensed",sans-serif;color:var(--dim)}
+.meter{width:clamp(110px,22vw,220px);height:12px;background:#0c0a09;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#6fae7c,var(--brass),#d2232a)}
+#report{font-size:15px;color:var(--dim)}
+#report strong{color:var(--ink);font-weight:500}
+@media(max-width:1100px){h1 span{display:none}}
+@media(max-width:940px){.sel span{display:none}}
+@media(max-width:600px){h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
+
+</style>
+</head>
+<body>
+<header>
+  <h1>Pool <span>· prototype</span></h1>
+  <div class="grow"></div>
+  <label class="sel"><span>Rules</span><select id="rulesSel" aria-label="Rules"></select></label>
+  <label class="sel"><span>Table</span><select id="tableSel" aria-label="Table size"></select></label>
+  <button id="soundBtn" aria-pressed="true">Sound</button>
+  <button id="rackBtn">Re-rack</button>
+</header>
+<div id="stage">
+  <div id="banner"><b id="turnText">Player 1 to break</b><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
+  <div id="spinBox" hidden>
+    <div id="spinBall" role="slider" tabindex="0" aria-label="Where to hit the cue ball (W A S D to move, X to centre)"><i id="spinDot"></i></div>
+    <span id="spinLabel">Centre</span>
+  </div>
+  <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><button id="nextBtn">Next frame</button></div></div>
+</div>
+<footer>
+  <div class="power"><b>Power</b><div class="meter"><i id="powerFill"></i></div></div>
+  <div id="report" class="grow" aria-live="polite">Break when ready.</div>
+  <div id="players" aria-label="Players"></div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+{
+// ================================================================
+// 1. TABLE PRESETS (all sizes in metres, from the official specs)
+// ================================================================
+const IN = 0.0254;   // one inch in metres
+// mouth = gap between the cushion noses at the pocket.
+// face = "pocket facing angle": 90° = jaws go straight back, bigger = jaws lean in so the pocket narrows.
+// knuckle = how rounded the cushion is where it turns into the pocket (UK middle pockets are very round).
+const TABLES = {
+  uk7: {   // English blackball / pub pool: 6ft x 3ft playing area, 2" balls, smaller 1 7/8" cue ball,
+           // round pockets 1.6x the ball width with nearly parallel jaws
+    name: 'UK 7ft · blackball', L: 72 * IN, W: 36 * IN, ball: 2 * IN, cueBall: 1.875 * IN,
+    ballMass: 0.118, cueMass: 0.096, cushion: 0.045, rail: 0.1,
+    corner: { mouth: 1.6 * 2 * IN, face: 135, knuckle: 0.008 }, side: { mouth: 1.6 * 2 * IN, face: 90, knuckle: 0.014 }, maxSpeed: 5.0,
+    roll: 0.024 },   // napped pub cloth is slow
+  us7: {   // American "bar box": 78" x 39", 2 1/4" balls, generous funnel-shaped pockets
+    name: 'US 7ft · bar box', L: 78 * IN, W: 39 * IN, ball: 2.25 * IN, cueBall: 2.25 * IN,
+    ballMass: 0.17, cueMass: 0.17, cushion: 0.05, rail: 0.11,
+    corner: { mouth: 4.875 * IN, face: 142, knuckle: 0.005 }, side: { mouth: 5.375 * IN, face: 104, knuckle: 0.006 }, maxSpeed: 5.4,
+    roll: 0.017 },
+  wpa9: {  // WPA tournament table: 100" x 50", corner mouth 4.5-4.625", side mouth 5-5.125"
+    name: 'WPA 9ft · tournament', L: 100 * IN, W: 50 * IN, ball: 2.25 * IN, cueBall: 2.25 * IN,
+    ballMass: 0.17, cueMass: 0.17, cushion: 0.05, rail: 0.115,
+    corner: { mouth: 4.55 * IN, face: 142, knuckle: 0.004 }, side: { mouth: 5.05 * IN, face: 104, knuckle: 0.005 }, maxSpeed: 5.8,
+    roll: 0.013 },   // fast tournament cloth
+};
+
+// These all change when you pick a different table, so they're "let" not "const"
+let T, L, W, HX, HZ, R, CUE_R, CUSHION, RAIL, CA, CB, MAX_SPEED;
+let POCKETS = [], CUSHIONS = [], WALLS = [];
+
+// Work out where a pocket jaw ends. Start at the tip of the cushion nose (N), facing the pocket (u),
+// and turn into the rail (v) by the facing angle until we reach the back of the cushion.
+function jawBack(N, u, v, face) {
+  const f = face * Math.PI / 180;
+  const dx = -Math.cos(f) * u[0] + Math.sin(f) * v[0];
+  const dz = -Math.cos(f) * u[1] + Math.sin(f) * v[1];
+  const len = CUSHION / Math.sin(f);
+  return [N[0] + dx * len, N[1] + dz * len];
+}
+
+// Round off one corner of a cushion outline. Takes the corner point and its two neighbours and swaps the
+// sharp corner for a curve of radius r that blends smoothly into both edges (like a rounded rubber knuckle).
+function fillet(prev, cur, next, r, segs = 8) {
+  const v1 = [prev[0] - cur[0], prev[1] - cur[1]], v2 = [next[0] - cur[0], next[1] - cur[1]];
+  const l1 = Math.hypot(...v1), l2 = Math.hypot(...v2);
+  v1[0] /= l1; v1[1] /= l1; v2[0] /= l2; v2[1] /= l2;
+  const angle = Math.acos(Math.max(-1, Math.min(1, v1[0] * v2[0] + v1[1] * v2[1])));   // the corner's angle
+  const t = r / Math.tan(angle / 2);                       // how far back along each edge the curve starts
+  const bis = [v1[0] + v2[0], v1[1] + v2[1]], bl = Math.hypot(...bis);
+  const c = [cur[0] + bis[0] / bl * r / Math.sin(angle / 2), cur[1] + bis[1] / bl * r / Math.sin(angle / 2)];   // curve centre
+  const p1 = [cur[0] + v1[0] * t, cur[1] + v1[1] * t], p2 = [cur[0] + v2[0] * t, cur[1] + v2[1] * t];
+  let a1 = Math.atan2(p1[1] - c[1], p1[0] - c[0]), a2 = Math.atan2(p2[1] - c[1], p2[0] - c[0]);
+  let d = a2 - a1;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;                   // always go the short way round
+  const pts = [];
+  for (let i = 0; i <= segs; i++) pts.push([c[0] + Math.cos(a1 + d * i / segs) * r, c[1] + Math.sin(a1 + d * i / segs) * r]);
+  return pts;
+}
+// Round the two nose corners (index 0 and 1) of a 4-point cushion outline
+function roundKnuckles(poly, r0, r1) {
+  const [a, b, c, d] = poly;
+  return [...fillet(d, a, b, r0), ...fillet(a, b, c, r1), c, d];
+}
+
+function applySpec(key) {
+  T = TABLES[key];
+  L = T.L; W = T.W; HX = L / 2; HZ = W / 2;
+  R = T.ball / 2; CUE_R = T.cueBall / 2;
+  CUSHION = T.cushion; RAIL = T.rail; MAX_SPEED = T.maxSpeed;
+  CA = HX + CUSHION; CB = HZ + CUSHION;   // half sizes of the outside edge of the cushions
+
+  // Cushions are 4-sided shapes: the "nose" faces the playing area, the angled ends are the pocket jaws.
+  // Build the top-right ones, then mirror them to get the rest.
+  const m = T.corner.mouth / Math.SQRT2;   // how far the nose stops short of the corner along each rail
+  const hs = T.side.mouth / 2;              // half the gap at a middle pocket
+  const longCornerN = [HX - m, HZ], longCornerB = jawBack(longCornerN, [1, 0], [0, 1], T.corner.face);
+  const longSideN = [hs, HZ], longSideB = jawBack(longSideN, [-1, 0], [0, 1], T.side.face);
+  const shortN = [HX, HZ - m], shortB = jawBack(shortN, [0, 1], [1, 0], T.corner.face);
+  CUSHIONS = [];
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])
+    CUSHIONS.push(roundKnuckles([longSideN, longCornerN, longCornerB, longSideB], T.side.knuckle, T.corner.knuckle).map(([x, z]) => [sx * x, sz * z]));
+  for (const sx of [-1, 1])
+    CUSHIONS.push(roundKnuckles([[HX, -shortN[1]], shortN, shortB, [shortB[0], -shortB[1]]], T.corner.knuckle, T.corner.knuckle).map(([x, z]) => [sx * x, z]));
+  // Every cushion edge becomes a wall for the physics
+  WALLS = CUSHIONS.flatMap(poly => poly.map((p, i) => [p, poly[(i + 1) % poly.length]]));
+
+  // Pockets: a circle that runs through the backs of its two jaws.
+  // r = size of the cut-out, drop = hole the ball falls down (fits just inside the jaws, so no cushion hangs over it), capture = how close a ball's centre must get to fall in.
+  POCKETS = [];
+  const cornerX = (longCornerB[0] + shortB[0]) / 2, cornerZ = (longCornerB[1] + shortB[1]) / 2;
+  const cornerR = Math.hypot(longCornerB[0] - shortB[0], longCornerB[1] - shortB[1]) / 2;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])
+    POCKETS.push({ x: sx * cornerX, z: sz * cornerZ, r: cornerR, drop: cornerR - 0.0005, capture: cornerR * 0.85 });
+  for (const sz of [-1, 1])
+    POCKETS.push({ x: 0, z: sz * longSideB[1], r: longSideB[0], drop: longSideB[0] - 0.0005, capture: longSideB[0] * 0.85 });
+
+  tablePlane.constant = -R;
+}
+
+// ================================================================
+// 1b. RULES ENGINE
+// ================================================================
+// A rule set is a plain object. The game hands judge() a summary of each shot, and judge() says what
+// happens next. To make your own rules, copy a rule set, give it a new key and change judge().
+//
+// judge() returns { result, msg, foul?, cue? } where result is one of:
+//   'continue' – same player shoots again      'switch' – other player's turn
+//   'foul'     – other player's turn with a free shot (cue: 'baulk' = must play from baulk,
+//                'baulk-optional' = play from where it lies or move it into baulk)
+//   'win' / 'lose' – the shooter wins or loses the frame      'rerack' – set up again, same player breaks
+
+const groupOf = n => n === 8 ? 'black' : n < 8 ? 'A' : 'B';      // A = 1-7 (reds/spots), B = 9-15 (yellows/stripes)
+const ballsLeft = grp => balls.filter(b => !b.potted && b.n !== 0 && groupOf(b.n) === grp).length;
+const baulkX = () => -HX + L / 5;   // the baulk line: a fifth of the way up from the bottom cushion
+
+const RULESETS = {
+  blackball: {
+    name: 'UK Blackball',
+    ballSet: 'ry',                     // reds and yellows
+    baulk: true,                       // break and ball-in-hand happen behind the baulk line
+    groupNames: { A: 'reds', B: 'yellows' },
+    // row by row from the front: black in the middle of row 3, a red and a yellow in the back corners
+    rack: [1, 9, 2, 10, 8, 11, 12, 3, 13, 4, 5, 14, 6, 7, 15],
+
+    // Which balls is this player allowed to hit first right now?
+    isOn(n, g) {
+      if (g.freeShot) return true;                          // a free shot can be played onto any ball
+      const grp = g.players[g.turn].group;
+      if (!grp) return n !== 8;                             // open table: any red or yellow, not the black
+      if (ballsLeft(grp) === 0) return n === 8;             // group cleared: only the black is on
+      return groupOf(n) === grp;
+    },
+
+    judge(s, g) {
+      const me = g.players[g.turn];
+      const black = s.potted.includes(8);
+      const colours = s.potted.filter(n => n !== 8);
+      const nm = n => n === 8 ? 'the black' : 'a ' + (n < 8 ? 'red' : 'yellow');
+
+      // ---- The break ----
+      if (s.isBreak) {
+        if (black) return { result: 'rerack', msg: 'Black potted on the break – re-rack, same player breaks again.' };
+        if (s.cuePotted) return { result: 'foul', foul: 'in-off on the break', cue: 'baulk' };
+        if (!colours.length && s.crossed < 2)
+          return { result: 'foul', foul: 'illegal break – fewer than two balls crossed the middle', cue: 'baulk-optional' };
+        return colours.length
+          ? { result: 'continue', msg: 'Good break – the table is still open (groups are never decided on the break).' }
+          : { result: 'switch', msg: 'Legal break, nothing potted.' };
+      }
+
+      // ---- Was it a legal shot? ----
+      const open = !me.group;
+      const ownBefore = open ? 0 : ballsLeft(me.group) + colours.filter(n => groupOf(n) === me.group).length;
+      const onBlack = !open && ownBefore === 0;
+      const on = n => g.freeShot ? true : open ? n !== 8 : onBlack ? n === 8 : groupOf(n) === me.group;
+      let foul = null;
+      if (s.cuePotted) foul = 'cue ball went in-off';
+      else if (s.firstHit === null) foul = "cue ball didn't hit anything";
+      else if (!on(s.firstHit)) foul = 'hit ' + nm(s.firstHit) + ' first';
+      else if (!s.potted.some(on) && !s.cushionAfterHit) foul = 'no ball hit a cushion after contact';
+      else if (!open && !g.freeShot && colours.some(n => groupOf(n) !== me.group) && !colours.some(n => groupOf(n) === me.group))
+        foul = "potted your opponent's ball without one of your own";
+
+      // ---- The black ----
+      if (black) {
+        if (foul) return { result: 'lose', msg: 'Black potted on a foul (' + foul + ').' };
+        if (!open && ballsLeft(me.group) === 0) return { result: 'win', msg: me.name + ' cleared the ' + RULE.groupNames[me.group] + ' and potted the black.' };
+        return { result: 'lose', msg: 'Black potted before clearing your ' + (open ? 'group' : RULE.groupNames[me.group]) + '.' };
+      }
+      if (foul) return { result: 'foul', foul, cue: s.cuePotted ? 'baulk' : 'baulk-optional' };
+
+      // ---- Deciding groups: first legal pot of a single colour on an open table (not on a free shot) ----
+      let msg = '';
+      if (open && !g.freeShot && colours.length) {
+        const kinds = [...new Set(colours.map(groupOf))];
+        if (kinds.length === 1) {
+          me.group = kinds[0];
+          g.players[1 - g.turn].group = kinds[0] === 'A' ? 'B' : 'A';
+          msg = me.name + ' is on ' + RULE.groupNames[me.group] + '. ';
+        } else msg = 'Both colours went down – table stays open. ';
+      }
+
+      // ---- Keep going or hand over? ----
+      const scored = colours.some(n => g.freeShot || open || groupOf(n) === me.group);
+      if (scored) return { result: 'continue', msg: msg + 'Keep going.' };
+      if (g.freeShot) return { result: 'continue', msg: msg + 'Free shot used – now your visit.' };
+      return { result: 'switch', msg: msg + 'Nothing potted.' };
+    },
+  },
+
+  free: {
+    name: 'Free play',
+    ballSet: 'numbers',
+    baulk: false,
+    rack: [1, 9, 2, 10, 8, 3, 11, 7, 14, 4, 5, 13, 15, 6, 12],
+    judge(s) {
+      const bits = [];
+      bits.push(s.firstHit === null ? 'cue ball hit nothing' : 'first hit <strong>' + s.firstHit + '</strong>');
+      bits.push(s.potted.length ? 'potted <strong>' + s.potted.join(', ') + '</strong>' : 'nothing potted');
+      bits.push(s.cushions + ' cushion' + (s.cushions === 1 ? '' : 's'));
+      if (s.cuePotted) bits.push('<strong>scratch</strong>');
+      return { result: 'continue', msg: 'Shot ' + s.number + ' (' + s.power + '% power): ' + bits.join(' · ') };
+    },
+  },
+};
+let RULE = RULESETS.blackball;
+
+// Everything about the frame that isn't ball positions
+const game = {
+  players: [{ name: 'Player 1', group: null, frames: 0 }, { name: 'Player 2', group: null, frames: 0 }],
+  turn: 0, breaker: 0, isBreak: true, freeShot: false, ballInHand: null, over: false,
+};
+
+function newFrame(breaker) {
+  game.breaker = breaker; game.turn = breaker;
+  game.isBreak = true; game.freeShot = false; game.over = false;
+  for (const p of game.players) p.group = null;
+  game.ballInHand = RULE.baulk ? 'baulk' : 'anywhere';
+  document.getElementById('over').hidden = true;
+  pendingView = 'top';   // start each frame overhead so you can place the white for the break
+  rack();
+  setReport(RULE.baulk ? game.players[breaker].name + ' to break from baulk.' : 'Break when ready.');
+  updateUI();
+}
+
+// Act on what the rules engine decided
+function applyVerdict(v) {
+  const me = game.players[game.turn], them = game.players[1 - game.turn];
+  game.isBreak = false;
+  game.freeShot = false;
+  game.ballInHand = null;
+  if (cue.potted) {
+    respawnCue();
+    if (!RULE.baulk) game.ballInHand = 'anywhere';   // free play: after a scratch, put the white where you like
+  }
+
+  if (v.result === 'rerack') { const b = game.breaker; newFrame(b); setReport('<strong>' + v.msg + '</strong>'); return; }
+  if (v.result === 'win' || v.result === 'lose') {
+    const winner = v.result === 'win' ? me : them;
+    winner.frames++;
+    game.over = true;
+    document.getElementById('overTitle').textContent = winner.name + ' wins the frame';
+    document.getElementById('overWhy').textContent = (v.result === 'win' ? '' : me.name + ' loses: ') + v.msg;
+    document.getElementById('overScore').textContent = game.players.map(p => p.name + ' ' + p.frames).join('  ·  ');
+    document.getElementById('over').hidden = false;
+    pendingView = 'top';
+    setReport('<strong>' + v.msg + '</strong>');
+    updateUI();
+    return;
+  }
+  if (v.result === 'foul') {
+    game.turn = 1 - game.turn;
+    game.freeShot = true;
+    game.ballInHand = v.cue === 'baulk' || v.cue === 'baulk-optional' ? v.cue : null;
+    if (v.cue === 'baulk' && cue.x > baulkX()) respawnCue();
+    setReport('<strong>Foul – ' + v.foul + '.</strong> ' + them.name + ' gets a free shot + 1 visit.', true);
+  } else {
+    if (v.result === 'switch') game.turn = 1 - game.turn;
+    setReport(v.msg);
+  }
+  // Next view: overhead if there's a white to place, otherwise straight back down on the cue
+  pendingView = game.ballInHand ? 'top' : 'cue';
+  updateUI();
+}
+
+// Scoreboard chips and the turn banner
+function updateUI() {
+  const me = game.players[game.turn];
+  const pl = document.getElementById('players');
+  pl.hidden = !RULE.groupNames;
+  if (RULE.groupNames) {
+    pl.innerHTML = game.players.map((p, i) => {
+      const g = p.group;
+      const sw = g ? `style="background:${g === 'A' ? RED : YELLOW}"` : '';
+      const left = g ? (ballsLeft(g) ? ballsLeft(g) + ' left' : 'on the black') : 'open';
+      return `<div class="pl${i === game.turn && !game.over ? ' on' : ''}"><i ${sw}></i>${p.name} <small>${left}</small> <span class="fr">${p.frames}</span></div>`;
+    }).join('');
+  }
+  let t;
+  if (!RULE.groupNames) t = 'Free play';
+  else if (game.over) t = 'Frame over';
+  else {
+    const grp = me.group ? (ballsLeft(me.group) ? 'on ' + RULE.groupNames[me.group] : 'on the black') : 'table open';
+    t = me.name + (game.isBreak ? ' to break' : ' · ' + grp);
+    if (game.freeShot) t += ' · <em>free shot + 1 visit</em>';
+  }
+  document.getElementById('turnText').innerHTML = t;
+  const h = document.getElementById('hint');
+  const v = typeof view === 'undefined' ? 'top' : view;
+  document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over);
+  h.hidden = state !== 'aim' || game.over;
+  if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D)' + (game.ballInHand ? ' · V moves the white' : '');
+  else if (game.ballInHand) h.textContent = game.ballInHand === 'baulk-optional'
+      ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
+      : 'Drag the white to place it' + (game.ballInHand === 'baulk' ? ' behind the baulk line' : '') + ' · press anywhere else to get down on the shot';
+  else h.hidden = true;
+}
+
+// Physics tuning – play with these to change the feel
+// A ball has two speeds: how fast it's moving (v) and how fast its spin would carry it if it were
+// rolling (u). When they differ the ball is skidding, and the cloth drags them together until it rolls.
+const G = 9.81;            // gravity, m/s²
+const SLIDE_GRIP = 0.2;    // cloth friction while a ball skids (bigger = grabs the cloth sooner)
+const BALL_BOUNCE = 0.93;  // 1 = perfectly bouncy ball-on-ball hits
+const CUSHION_BOUNCE = 0.75;
+const CUSHION_SPIN = 0.5;  // how much forward spin survives a cushion hit (the cushion grips the top of the ball)
+// Spin from hitting the cue ball off-centre
+const MAX_TIP = 0.5;       // furthest you can hit from the centre, as a fraction of the ball's radius (further = miscue)
+const SIDE_DECAY = 1.5;    // how quickly side spin wears off on the cloth
+const SIDE_GRIP = 0.35;    // how strongly side spin changes the angle off a cushion
+const SQUIRT = 0.05;       // how far side spin pushes the white off line (radians at full side)
+const SUBSTEPS = 10;       // split each frame into small steps so fast balls don't pass through each other
+
+const COLOURS = { 1:'#f2c21b', 2:'#1f4fbf', 3:'#d2232a', 4:'#5b2a86', 5:'#f07c1e', 6:'#13804a', 7:'#7a1f1f', 8:'#111111' };
+const RED = '#c4161c', YELLOW = '#f6c419';
+const colourOf = n => RULE.ballSet === 'ry' && n !== 8 ? (n < 8 ? RED : YELLOW) : COLOURS[n > 8 ? n - 8 : n];
+
+// ================================================================
+// 2. THREE.JS SETUP (the 3D drawing side)
+// ================================================================
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const tablePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);   // the table surface, used to turn clicks into table positions
+{
+  // A soft warm-dark gradient for the room behind the table (you only see it from the cue view)
+  const c = document.createElement('canvas'); c.width = 2; c.height = 256;
+  const g = c.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#0b0908'); grad.addColorStop(0.6, '#1a1310'); grad.addColorStop(1, '#2a1d15');
+  g.fillStyle = grad; g.fillRect(0, 0, 2, 256);
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
+  scene.background = t;
+}
+
+// One perspective camera, high up with a narrow view so it looks almost flat.
+// Later we'll glide this same camera down behind the cue ball for the cue view.
+const camera = new THREE.PerspectiveCamera(10, 1, 0.03, 100);
+
+// Lighting: a big soft lamp over the table plus a little fill light so nothing goes pitch black
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+// Warm, even light: a soft amber fill from everywhere, plus a high lamp with a very soft edge,
+// so the table is lit evenly instead of having a bright hotspot in the middle
+const WARM = 0xffc98a;   // tungsten-bulb orange
+scene.add(new THREE.HemisphereLight(WARM, 0x2a1c12, 0.75));
+const lamp = new THREE.SpotLight(WARM, 1.05, 0, 0.55, 1, 1);
+lamp.position.set(0, 6, 0);
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(2048, 2048);
+lamp.shadow.bias = -0.0004;
+scene.add(lamp, lamp.target);
+
+// --- Procedural textures (drawn on a canvas, so no image files needed) ---
+function canvasTexture(w, h, draw, repeat) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.encoding = THREE.sRGBEncoding; t.anisotropy = 8;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (repeat) t.repeat.set(repeat, repeat);
+  return t;
+}
+// Felt: flat colour with fine speckle so it reads as cloth, not plastic
+const feltTex = canvasTexture(256, 256, (g, w, h) => {
+  g.fillStyle = '#12583a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 9000; i++) {
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.06)';
+    g.fillRect(Math.random() * w, Math.random() * h, 1, 1);
+  }
+}, 6);
+// Wood: dark walnut with long grain streaks running along the rail
+const woodTex = canvasTexture(1024, 256, (g, w, h) => {
+  g.fillStyle = '#52280f'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 140; i++) {
+    // whole number of waves across the width, so the texture repeats without a visible seam
+    const y = Math.random() * h, amp = 1 + Math.random() * 4, f = (1 + Math.floor(Math.random() * 3)) * 2 * Math.PI / w;
+    g.strokeStyle = `rgba(${Math.random() < 0.5 ? '20,8,2' : '120,62,30'},${0.08 + Math.random() * 0.18})`;
+    g.lineWidth = 0.5 + Math.random() * 2;
+    g.beginPath();
+    for (let x = 0; x <= w; x += 8) g.lineTo(x, y + Math.sin(x * f + i) * amp);
+    g.stroke();
+  }
+}, 0.9);
+
+const mat = (color, rough = 0.8) => new THREE.MeshStandardMaterial({ color: new THREE.Color(color).convertSRGBToLinear(), roughness: rough });
+
+// --- Shape helpers ---
+// Three.js shapes are drawn on a flat x/y sheet, then we tip them over to lie on the table.
+// Table z becomes -y on the sheet, so we flip the sign when building shapes.
+const V2 = (x, z) => new THREE.Vector2(x, -z);
+let tableGroup = new THREE.Group();   // holds every piece of the table, so we can swap tables easily
+scene.add(tableGroup);
+function layFlat(geo, mat, y) {
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2; m.position.y = y;
+  m.receiveShadow = true; tableGroup.add(m); return m;
+}
+
+// The outline of the cushion area with the pockets cut in.
+// We walk round the rectangle; whenever we walk into a pocket circle we follow the circle's edge instead.
+// carve = false: go round the OUTSIDE of each circle (the rail's cut-out is the rectangle plus the circles).
+// carve = true:  go round the INSIDE (the cloth is the rectangle with the circles bitten out of it).
+function pocketedOutline(a, b, grow, carve = false) {
+  const pts = [], stepLen = 0.002;
+  const corners = [[-a, -b], [a, -b], [a, b], [-a, b]];
+  for (let i = 0; i < 4; i++) {
+    const [x0, z0] = corners[i], [x1, z1] = corners[(i + 1) % 4];
+    const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / stepLen);
+    for (let k = 0; k < n; k++) pts.push([x0 + (x1 - x0) * k / n, z0 + (z1 - z0) * k / n]);
+  }
+  // start somewhere that's definitely not inside a pocket
+  const start = pts.findIndex(p => p[1] === -b && p[0] > -a / 2);
+  const ring = pts.slice(start).concat(pts.slice(0, start));
+  const inPocket = p => POCKETS.find(c => Math.hypot(p[0] - c.x, p[1] - c.z) < c.r + grow);
+  const out = [];
+  let open = null;   // the pocket we're currently inside, and where we entered it
+  for (const p of ring) {
+    const c = inPocket(p);
+    if (open && c !== open.c) {
+      // leaving a pocket: add its outer arc from where we came in to here
+      const pc = open.c, rr = pc.r + grow;
+      const a0 = Math.atan2(open.p[1] - pc.z, open.p[0] - pc.x), a1 = Math.atan2(p[1] - pc.z, p[0] - pc.x);
+      let d = ((a1 - a0) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      const mid = a0 + d / 2, mx = pc.x + Math.cos(mid) * rr, mz = pc.z + Math.sin(mid) * rr;
+      if ((Math.abs(mx) < a && Math.abs(mz) < b) !== carve) d -= 2 * Math.PI;   // wrong way round: go the other way
+      for (let k = 0; k <= 40; k++) out.push([pc.x + Math.cos(a0 + d * k / 40) * rr, pc.z + Math.sin(a0 + d * k / 40) * rr]);
+      open = null;
+    }
+    if (!open && c) open = { c, p };
+    else if (!c) out.push(p);
+  }
+  return out;
+}
+
+// Materials are made once and shared by every table size
+const feltMat = new THREE.MeshStandardMaterial({ map: feltTex, roughness: 1, color: 0xffffff });
+const cushionMat = new THREE.MeshStandardMaterial({ map: feltTex, roughness: 1, color: 0xb4b4b4 });
+const woodMat = new THREE.MeshPhysicalMaterial({ map: woodTex, roughness: 0.6, clearcoat: 0.15, clearcoatRoughness: 0.5 });
+const pearl = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xe9dfcc).convertSRGBToLinear(), roughness: 0.3, emissive: 0x1a1712 });
+const spotMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x0e4630).convertSRGBToLinear() });
+const lineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x4f8f6c).convertSRGBToLinear() });   // chalky baulk line
+const RAIL_H = 0.044, BEVEL = 0.006, RAIL_TOP = RAIL_H + 0.008;
+const apronMat = new THREE.MeshStandardMaterial({ map: woodTex, color: new THREE.Color(0x8a6a58).convertSRGBToLinear(), roughness: 0.7 });   // darker wood for the sides
+
+// The room: a dark floor well below the table, so the cue view isn't floating in a black void
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: new THREE.Color(0x1c1512).convertSRGBToLinear(), roughness: 1 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -0.78; floor.receiveShadow = true;
+scene.add(floor);
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });   // the bottom of the pocket, deep in shadow
+const POCKET_DEPTH = 0.13;   // how deep the pocket hole goes, so potted balls have somewhere to fall
+const cupMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });   // black inside wall of the hole
+// colours given as hex are in screen (sRGB) space, so convert them to the linear space the lighting maths uses
+const linerMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x0d0b0a).convertSRGBToLinear(), roughness: 0.85 });
+
+// Build every piece of the table for the current size. Called again whenever you change table.
+function buildTable() {
+  scene.remove(tableGroup);
+  tableGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  tableGroup = new THREE.Group();
+  scene.add(tableGroup);
+
+  // --- Felt bed: the cushion rectangle with each pocket hole bitten out, so there's no cloth under the rail ---
+  // (each pocket hole is drawn the same size as its drop, so grow = drop - r)
+  const feltShape = new THREE.Shape(pocketedOutline(CA, CB, POCKETS[0].drop - POCKETS[0].r, true).map(p => V2(...p)));
+  layFlat(new THREE.ShapeGeometry(feltShape, 24), feltMat, 0);
+
+  // --- Cushions: extruded from their 4-corner outlines, with a soft rounded top edge ---
+  const CUSHION_H = 0.036;
+  for (const poly of CUSHIONS) {
+    const s = new THREE.Shape(poly.map(p => V2(...p)));
+    const geo = new THREE.ExtrudeGeometry(s, { depth: CUSHION_H - 0.004, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.003, bevelSegments: 3 });
+    const m = layFlat(geo, cushionMat, 0); m.castShadow = true;
+  }
+
+  // --- Wooden rail: one frame with rounded outer corners and the pockets cut out of it ---
+  const OA = CA + RAIL, OB = CB + RAIL, OR = 0.07;   // outer half sizes and corner rounding
+  const railShape = new THREE.Shape();
+  railShape.moveTo(-OA + OR, OB);
+  railShape.lineTo(OA - OR, OB); railShape.quadraticCurveTo(OA, OB, OA, OB - OR);
+  railShape.lineTo(OA, -OB + OR); railShape.quadraticCurveTo(OA, -OB, OA - OR, -OB);
+  railShape.lineTo(-OA + OR, -OB); railShape.quadraticCurveTo(-OA, -OB, -OA, -OB + OR);
+  railShape.lineTo(-OA, OB - OR); railShape.quadraticCurveTo(-OA, OB, -OA + OR, OB);
+  // the bevel widens the hole a little, so cut it slightly smaller to make up for it
+  railShape.holes.push(new THREE.Path(pocketedOutline(CA - BEVEL, CB - BEVEL, -BEVEL).map(p => V2(...p))));
+  const railGeo = new THREE.ExtrudeGeometry(railShape, { depth: RAIL_H, bevelEnabled: true, bevelThickness: 0.008, bevelSize: BEVEL, bevelSegments: 4, curveSegments: 16 });
+  const rail = layFlat(railGeo, woodMat, 0); rail.castShadow = true;
+
+  // --- Table body: the wooden apron under the rail, so from the cue view the table has some weight to it ---
+  const apronShape = new THREE.Shape();
+  apronShape.moveTo(-OA + OR, OB);
+  apronShape.lineTo(OA - OR, OB); apronShape.quadraticCurveTo(OA, OB, OA, OB - OR);
+  apronShape.lineTo(OA, -OB + OR); apronShape.quadraticCurveTo(OA, -OB, OA - OR, -OB);
+  apronShape.lineTo(-OA + OR, -OB); apronShape.quadraticCurveTo(-OA, -OB, -OA, -OB + OR);
+  apronShape.lineTo(-OA, OB - OR); apronShape.quadraticCurveTo(-OA, OB, -OA + OR, OB);
+  apronShape.holes.push(new THREE.Path(pocketedOutline(CA, CB, 0).map(p => V2(...p))));   // hollow, so the pockets stay open
+  const apron = layFlat(new THREE.ExtrudeGeometry(apronShape, { depth: 0.2, bevelEnabled: false, curveSegments: 16 }), apronMat, -0.205);
+  apron.position.y = -0.205;
+
+  // --- Pockets: a dark hole you can see into, and a black leather liner wrapped round the cut-out ---
+  for (const p of POCKETS) {
+    const hole = layFlat(new THREE.CircleGeometry(p.drop + 0.001, 48), holeMat, -POCKET_DEPTH);
+    hole.position.set(p.x, -POCKET_DEPTH, p.z);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(p.drop, p.drop, POCKET_DEPTH, 48, 1, true), cupMat);
+    cup.position.set(p.x, -POCKET_DEPTH / 2, p.z);
+    tableGroup.add(cup);
+    // Find the part of the pocket's rim that sits on the wooden rail (the bit outside the cushions)
+    const N = 720, onRail = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / N * Math.PI * 2, x = p.x + Math.cos(t) * p.r, z = p.z + Math.sin(t) * p.r;
+      onRail.push(Math.abs(x) > CA - 0.001 || Math.abs(z) > CB - 0.001);   // small allowance so a rim touching the cushion corner isn't split in two
+    }
+    const start = onRail.findIndex((v, i) => v && !onRail[(i - 1 + N) % N]);
+    let len = 0; while (onRail[(start + len) % N] && len < N) len++;
+    // stretch it a little past each end so it wraps onto the cushion tips with no wood showing in between
+    const s0 = start / N * Math.PI * 2 - 0.14, d = len / N * Math.PI * 2 + 0.28;
+    // laying the ring flat flips the angle direction, hence the minus signs
+    const liner = layFlat(new THREE.RingGeometry(p.r - 0.006, p.r + 0.009, 64, 1, -(s0 + d), d), linerMat, RAIL_TOP + 0.0008);
+    liner.position.set(p.x, RAIL_TOP + 0.0008, p.z);
+  }
+
+  // --- Diamonds: little mother-of-pearl inlays on the rail top ---
+  const railMid = (CUSHION + CUSHION + RAIL) / 2;   // halfway across the rail
+  const diamond = (x, z) => {
+    const d = layFlat(new THREE.CircleGeometry(0.0065, 4), pearl, RAIL_TOP + 0.0005);
+    d.position.set(x, RAIL_TOP + 0.0005, z);
+  };
+  for (const k of [-3, -2, -1, 1, 2, 3]) for (const s of [-1, 1]) diamond(k * L / 8, s * (HZ + railMid));
+  for (const k of [-1, 0, 1]) for (const s of [-1, 1]) diamond(s * (HX + railMid), k * W / 4);
+
+  // --- Cloth markings: the black spot (where the rack goes), plus the baulk line if the rules use one ---
+  const spots = RULE.baulk ? [L / 4] : [-L / 4, L / 4];
+  for (const x of spots) {
+    const m = layFlat(new THREE.CircleGeometry(0.006, 16), spotMat, 0.0005);
+    m.position.set(x, 0.0005, 0);
+  }
+  if (RULE.baulk) {
+    const line = layFlat(new THREE.PlaneGeometry(0.003, W), lineMat, 0.0005);
+    line.position.set(baulkX(), 0.0005, 0);
+  }
+}
+
+// --- Ball textures: drawn on a little 2D canvas, then wrapped around a sphere ---
+function ballTexture(n) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  if (RULE.ballSet === 'ry' && n !== 0 && n !== 8) {
+    // UK set: plain reds and yellows with no numbers
+    g.fillStyle = n < 8 ? RED : YELLOW; g.fillRect(0, 0, 256, 128);
+    const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+  }
+  if (n === 0) { g.fillStyle = '#f4f1ea'; g.fillRect(0, 0, 256, 128); }
+  else if (n > 8) {            // stripes: white ball with a coloured band round the middle
+    g.fillStyle = '#f4f1ea'; g.fillRect(0, 0, 256, 128);
+    g.fillStyle = colourOf(n); g.fillRect(0, 34, 256, 60);
+  } else { g.fillStyle = colourOf(n); g.fillRect(0, 0, 256, 128); }
+  if (n > 0) {                 // two white number spots on opposite sides
+    for (const x of [64, 192]) {
+      g.fillStyle = '#f4f1ea'; g.beginPath(); g.arc(x, 64, 19, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#111'; g.font = 'bold 22px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(n, x, 65);
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; t.encoding = THREE.sRGBEncoding; return t;
+}
+const ballGeos = {};   // one sphere shape per ball size, shared between balls
+const ballGeo = r => ballGeos[r] || (ballGeos[r] = new THREE.SphereGeometry(r, 32, 20));
+
+// ================================================================
+// 3. GAME STATE
+// ================================================================
+let balls = [];          // every ball: { n, x, z, vx, vz, r (radius), m (mass), potted, mesh }
+let cue = null;          // shortcut to ball 0
+let state = 'aim';       // 'aim' (waiting for a shot) or 'moving' (balls rolling)
+let aim = { x: 1, z: 0 };// direction the cue is pointing (unit vector)
+let power = 0, shotCount = 0;
+let shot = null;         // record of what happened in the current shot (the rules engine reads this)
+let placing = false;     // true while you're dragging the cue ball (ball in hand)
+
+function makeBall(n, x, z) {
+  const r = n === 0 ? CUE_R : R, m = n === 0 ? T.cueMass : T.ballMass;
+  const mesh = new THREE.Mesh(ballGeo(r), new THREE.MeshPhysicalMaterial({ map: ballTexture(n), roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 }));
+  mesh.castShadow = true;
+  // Turn the number spot to face up, then spin it a random amount so the rack looks natural
+  mesh.quaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+  mesh.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2));
+  scene.add(mesh);
+  return { n, x, z, vx: 0, vz: 0, ux: 0, uz: 0, side: 0, r, m, potted: false, mesh };
+}
+
+function rack() {
+  for (const b of balls) scene.remove(b.mesh);
+  falling = [];
+  balls = [];
+  // The rules decide the order, row by row from the front. The black (8) sits in the middle of row 3,
+  // right on the black spot, where the diagonals from the middle pockets to the far corners cross.
+  const order = RULE.rack;
+  const gap = 2 * R + 0.0004, rowStep = gap * Math.sqrt(3) / 2;
+  const apex = L / 4 - 2 * rowStep;
+  let i = 0;
+  for (let row = 0; row < 5; row++) {
+    for (let k = 0; k <= row; k++) {
+      const x = apex + row * rowStep;
+      const z = (k - row / 2) * gap;
+      balls.push(makeBall(order[i++], x, z + (Math.random() - 0.5) * 0.0004));
+    }
+  }
+  const start = RULE.baulk ? baulkX() - 0.12 : -L / 4;
+  cue = makeBall(0, start, 0);
+  balls.push(cue);
+  aim = { x: 1, z: 0 };
+  state = 'aim'; shotCount = 0; shot = null;
+  syncMeshes();
+}
+
+// ================================================================
+// 4. PHYSICS (all 2D – x and z on the table surface)
+// ================================================================
+function step(h) {
+  const live = balls.filter(b => !b.potted);
+
+  // Move each ball, then let the cloth act on it
+  for (const b of live) {
+    b.x += b.vx * h; b.z += b.vz * h;
+    const sx = b.vx - b.ux, sz = b.vz - b.uz, slip = Math.hypot(sx, sz);
+    if (slip > 0.002) {
+      // SKIDDING: friction pushes against the skid. It slows the ball down a bit (2/7 of the change)
+      // and spins it up a lot (5/7), because a solid ball is easy to spin. Then it's rolling.
+      const fix = Math.min(slip, 3.5 * SLIDE_GRIP * G * h);
+      const dx = sx / slip, dz = sz / slip;
+      b.vx -= dx * fix * 2 / 7; b.vz -= dz * fix * 2 / 7;
+      b.ux += dx * fix * 5 / 7; b.uz += dz * fix * 5 / 7;
+    } else {
+      // ROLLING: spin matches movement, and a small rolling drag slows it gently to a stop
+      const speed = Math.hypot(b.vx, b.vz);
+      const newSpeed = Math.max(0, speed - T.roll * G * h);   // T.roll = the table's cloth drag (bigger = balls stop sooner)
+      const k = speed > 0 ? newSpeed / speed : 0;
+      b.vx *= k; b.vz *= k; b.ux = b.vx; b.uz = b.vz;
+    }
+    // Side spin (spinning like a top) slowly wears off on the cloth
+    if (b.side) b.side = Math.sign(b.side) * Math.max(0, Math.abs(b.side) - SIDE_DECAY * h);
+  }
+
+  // Ball-on-ball collisions: check every pair once
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const a = live[i], b = live[j];
+      const dx = b.x - a.x, dz = b.z - a.z, d2 = dx * dx + dz * dz;
+      const touch = a.r + b.r;
+      if (d2 >= touch * touch || d2 === 0) continue;
+      const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;   // n = unit line from a's centre to b's centre
+      // Push them apart so they're just touching (stops them sticking together)
+      const overlap = (touch - d) / 2;
+      a.x -= nx * overlap; a.z -= nz * overlap; b.x += nx * overlap; b.z += nz * overlap;
+      // How fast are they closing along that line? If not closing, nothing to do.
+      const closing = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+      if (closing <= 0) continue;
+      // Impulse = the "kick" each ball gets along the line between them. A lighter ball gets
+      // pushed more by the same kick (that's why a UK cue ball follows through after a hit).
+      const kick = closing * (1 + BALL_BOUNCE) / (1 / a.m + 1 / b.m);
+      sfxClick(closing, (a.x + b.x) / 2, (a.z + b.z) / 2);
+      a.vx -= kick / a.m * nx; a.vz -= kick / a.m * nz; b.vx += kick / b.m * nx; b.vz += kick / b.m * nz;
+      // Note the first ball the cue ball touches – rules need this
+      if (shot && shot.firstHit === null && (a === cue || b === cue)) {
+        shot.firstHit = (a === cue ? b : a).n;
+        shot.firstBall = a === cue ? b : a;   // the chase cam switches to following this ball
+      }
+    }
+  }
+
+  // On the break, note object balls that fully cross the line between the middle pockets
+  if (shot && shot.isBreak) for (const b of live) if (b !== cue && b.x + b.r < 0) shot.crossed.add(b.n);
+
+  // Cushions: check each ball against every cushion edge (nose and jaws)
+  for (const b of live) {
+    for (const [p, q] of WALLS) {
+      // closest point on the edge p→q to the ball's centre
+      const ex = q[0] - p[0], ez = q[1] - p[1];
+      const t = Math.max(0, Math.min(1, ((b.x - p[0]) * ex + (b.z - p[1]) * ez) / (ex * ex + ez * ez)));
+      const cx = p[0] + ex * t, cz = p[1] + ez * t;
+      const dx = b.x - cx, dz = b.z - cz, d = Math.hypot(dx, dz);
+      if (d >= b.r || d === 0) continue;
+      const nx = dx / d, nz = dz / d;              // direction pointing away from the cushion
+      b.x = cx + nx * b.r; b.z = cz + nz * b.r;        // push the ball back out so it's just touching
+      const into = b.vx * nx + b.vz * nz;          // speed heading into the cushion
+      if (into < 0) {
+        b.vx -= (1 + CUSHION_BOUNCE) * into * nx; b.vz -= (1 + CUSHION_BOUNCE) * into * nz;
+        // The ball's forward spin was carrying it into the cushion. The cushion grips the top of the
+        // ball and reverses some of that spin, so it comes off a little "dead" rather than skating away.
+        const spinIn = b.ux * nx + b.uz * nz;
+        if (spinIn < 0) { b.ux -= (1 + CUSHION_SPIN) * spinIn * nx; b.uz -= (1 + CUSHION_SPIN) * spinIn * nz; }
+        // Side spin: the spinning ball grips the cushion and gets pushed sideways along it.
+        // Right-hand side (side > 0) kicks the ball to the shooter's right, left-hand side to the left.
+        // The kick is limited by how hard the ball hit the cushion (friction needs pressure).
+        if (b.side) {
+          const kick = Math.sign(b.side) * Math.min(Math.abs(b.side) * SIDE_GRIP, 0.3 * (1 + CUSHION_BOUNCE) * -into);
+          b.vx += kick * nz; b.vz -= kick * nx;
+          b.ux += kick * nz; b.uz -= kick * nx;
+          b.side *= 0.6;   // the cushion uses up some of the spin
+        }
+        hitCushion(into);
+        sfxThud(-into, b.x, b.z);
+      }
+    }
+    // Pockets: once the centre is close enough to a pocket centre, the ball falls in
+    const dropped = POCKETS.some(p => Math.hypot(b.x - p.x, b.z - p.z) < p.capture)
+      || Math.abs(b.x) > CA + 0.05 || Math.abs(b.z) > CB + 0.05;   // safety net: anything that escapes counts as potted
+    if (dropped) potBall(b);
+  }
+}
+
+function hitCushion(into) {
+  if (!shot || into > -0.02) return;
+  shot.cushions++;
+  if (shot.firstHit !== null) shot.cushionAfterHit = true;   // legal-shot rule: a cushion must be hit AFTER first contact
+}
+
+// Balls that are currently dropping into a pocket (just for the animation – physics already counts them as potted)
+let falling = [];
+const FALL_TIME = 0.6;    // seconds
+
+function potBall(b) {
+  sfxDrop(Math.hypot(b.vx, b.vz), b.x, b.z);
+  // Work out which pocket it went in (the nearest one), then hand the ball over to the drop animation
+  const p = POCKETS.reduce((best, q) => Math.hypot(b.x - q.x, b.z - q.z) < Math.hypot(b.x - best.x, b.z - best.z) ? q : best);
+  falling.push({ b, p, t: 0, x0: b.x, z0: b.z, spinX: b.ux, spinZ: b.uz });
+  b.potted = true; b.vx = b.vz = b.ux = b.uz = b.side = 0;
+  if (!shot) return;
+  if (b === cue) { shot.cuePotted = true; return; }
+  shot.potted.push(b.n);
+}
+
+const anyMoving = () => balls.some(b => !b.potted && Math.hypot(b.vx, b.vz) + Math.hypot(b.ux, b.uz) > 0.006);
+
+// ================================================================
+// 5. SHOOTING AND THE END-OF-SHOT REPORT
+// ================================================================
+function shoot() {
+  const speed = 0.25 + Math.pow(power, 1.3) * MAX_SPEED;   // curve gives finer control on soft shots
+  sfxStrike(power, cue.x, cue.z);
+  // Where the tip hits the white, as a fraction of its radius (spin.x = right of centre, spin.y = above centre)
+  const tipX = spin.x * MAX_TIP, tipY = spin.y * MAX_TIP;
+  // Side spin squirts the white slightly the opposite way to the side you hit
+  const sq = -tipX * SQUIRT / MAX_TIP, c = Math.cos(sq), sn = Math.sin(sq);
+  const dx = aim.x * c - aim.z * sn, dz = aim.x * sn + aim.z * c;
+  cue.vx = dx * speed; cue.vz = dz * speed;
+  // A solid ball hit at height h above centre spins at 2.5 x speed x h. As a "rolling speed" that's:
+  //   h = 0    -> no spin, the white skids then starts rolling (stun)
+  //   h = 0.4  -> exactly natural roll
+  //   h > 0.4  -> top spin, keeps driving forward after contact (follow)
+  //   h < 0    -> back spin, pulls back after contact (screw)
+  cue.ux = dx * speed * 2.5 * tipY; cue.uz = dz * speed * 2.5 * tipY;
+  cue.side = speed * 2.5 * tipX;   // right of centre = positive = kicks right off cushions
+  // Everything the rules need to know about this shot gets recorded in here as it plays out
+  shot = { number: ++shotCount, power: Math.round(power * 100), firstHit: null, potted: [], cushions: 0,
+           cushionAfterHit: false, cuePotted: false, isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set() };
+  state = 'moving'; power = 0; updatePower();
+  game.ballInHand = null;
+  frozen = true; startChase();
+  setSpin(0, 0);   // back to a centre-ball hit for the next shot
+  hint.hidden = true; hint.dataset.seen = '1';
+  updateUI();
+}
+
+function finishShot() {
+  for (const b of balls) { b.vx = b.vz = b.ux = b.uz = b.side = 0; }
+  state = 'aim';
+  shot.crossed = shot.crossed.size;
+  const v = RULE.judge(shot, game);   // the rules engine decides what happens next
+  applyVerdict(v);
+}
+
+// Put the cue ball back after it's gone in-off: in baulk if the rules use one, otherwise on the head spot.
+// It slides sideways until it isn't touching another ball.
+function respawnCue() {
+  let x = RULE.baulk ? baulkX() - 0.12 : -L / 4, z = 0;
+  const clash = () => balls.some(b => b !== cue && !b.potted && Math.hypot(b.x - x, b.z - z) < (b.r + cue.r) * 1.1);
+  for (let i = 1; clash() && i < 40; i++) z = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * cue.r * 2.2;
+  Object.assign(cue, { x, z, vx: 0, vz: 0, ux: 0, uz: 0, side: 0, potted: false });
+  falling = falling.filter(f => f.b !== cue);   // stop its drop animation if it's still playing
+  cue.mesh.material.color.setScalar(1);
+  cue.mesh.scale.setScalar(1);
+  cue.mesh.visible = true;
+  cue.mesh.position.set(cue.x, cue.r, cue.z);
+}
+
+function setReport(html, isFoul) { const r = document.getElementById('report'); r.innerHTML = html; r.classList.toggle('foul', !!isFoul); }
+
+// ================================================================
+// 6. AIM GUIDE AND CUE STICK
+// ================================================================
+// Cue stick: a tapered cylinder inside a group. The group sits on the cue ball and turns to face the aim.
+const cueGroup = new THREE.Group();
+const CUE_LEN = 1.45;
+const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.014, CUE_LEN, 16), mat('#c9a06a', 0.5));
+stick.rotation.z = -Math.PI / 2;       // lay it flat, thin tip pointing along +x
+stick.castShadow = true;
+const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.0066, 0.0066, 0.012, 16), mat('#3b6ea8', 0.9));
+tip.rotation.z = -Math.PI / 2;
+const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.0142, 0.0142, 0.35, 16), mat('#22140c', 0.5));
+butt.rotation.z = -Math.PI / 2;
+// The stick lives in a "tilt" group so the butt end rises a few degrees, like a real cue resting on a bridge hand
+const cueTilt = new THREE.Group();
+cueTilt.rotation.z = -0.07;   // about 4°: tip stays at the ball, the butt end lifts
+cueTilt.add(stick, tip, butt);
+cueGroup.add(cueTilt); scene.add(cueGroup);
+
+function updateAimVisuals() {
+  const aiming = state === 'aim' && !cue.potted && !game.over;
+  cueGroup.visible = aiming;
+  if (!aiming) return;
+
+  // Cue stick: pull back further the more power you've dialled in
+  const back = 0.012 + power * 0.28;
+  cueGroup.position.set(cue.x, cue.r + 0.004, cue.z);
+  cueGroup.rotation.y = Math.atan2(-aim.z, aim.x);
+  // move the cue up/down and left/right to the spot you've chosen on the spin dial
+  cueTilt.position.set(0, spin.y * MAX_TIP * cue.r, spin.x * MAX_TIP * cue.r);
+  stick.position.x = -back - CUE_LEN / 2;
+  tip.position.x = -back - 0.006;
+  butt.position.x = -back - CUE_LEN + 0.175;
+
+}
+
+// ================================================================
+// 7. INPUT (mouse and touch both use pointer events)
+// ================================================================
+const raycaster = new THREE.Raycaster();
+const hint = document.getElementById('hint');
+
+// Turn a screen position into a point on the table
+function tablePoint(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const p = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(tablePlane, p) ? { x: p.x, z: p.z } : null;
+}
+
+function aimAt(p) {
+  const dx = p.x - cue.x, dz = p.z - cue.z, d = Math.hypot(dx, dz);
+  if (d > 0.005) aim = { x: dx / d, z: dz / d };
+}
+
+const el = renderer.domElement;
+
+// --- Aiming happens only in the cue view ---
+// view = where the camera is: 'cue' (low, behind the cue ball) for every shot, or 'top' (overhead) for
+// watching the balls and for placing the white when you've got ball in hand.
+// In cue view a drag is either sideways (turn the aim) or downwards (pull the cue back);
+// whichever way you move first decides which.
+let view = 'top';
+let gesture = null;   // the current cue-view drag: where it started and what it's doing
+
+function turnAim(rad) {
+  const c = Math.cos(rad), s = Math.sin(rad);
+  aim = { x: aim.x * c - aim.z * s, z: aim.x * s + aim.z * c };
+}
+
+// Point the cue at the nearest ball you're allowed to hit, as a starting aim for each shot
+function autoAim() {
+  let best = null, bd = Infinity;
+  for (const b of balls) {
+    if (b === cue || b.potted) continue;
+    if (RULE.isOn && !RULE.isOn(b.n, game)) continue;
+    const d = Math.hypot(b.x - cue.x, b.z - cue.z);
+    if (d < bd) { bd = d; best = b; }
+  }
+  if (best) aimAt(best);
+}
+
+el.addEventListener('pointermove', e => {
+  if (state !== 'aim' || game.over) return;
+  if (gesture) {
+    const dx = e.clientX - gesture.x0, dy = e.clientY - gesture.y0;
+    if (!gesture.mode && Math.hypot(dx, dy) > 6) gesture.mode = dy > Math.abs(dx) ? 'power' : 'aim';
+    if (gesture.mode === 'aim') {
+      // small movements turn slowly for accuracy, quick flicks turn faster; Shift makes it extra-fine
+      const step = e.clientX - gesture.lastX;
+      turnAim(step * (e.shiftKey ? 0.0004 : 0.0025 * (1 + Math.abs(step) * 0.12)));
+    }
+    if (gesture.mode === 'power') { power = Math.min(1, Math.max(0, dy / (0.4 * stage.clientHeight))); updatePower(); }
+    gesture.lastX = e.clientX;
+    return;
+  }
+  // Top view: the only thing you can do is move the white (ball in hand)
+  if (view !== 'top' || camBlend > 0) return;
+  const p = tablePoint(e); if (!p) return;
+  if (placing) { placeCue(p); return; }
+  el.style.cursor = canPlace() && Math.hypot(p.x - cue.x, p.z - cue.z) < cue.r * 2.5 ? 'grab' : '';
+});
+
+el.addEventListener('pointerdown', () => audioInit(), true);
+el.addEventListener('pointerdown', e => {
+  if (state !== 'aim' || game.over || pendingView) return;
+  if (view === 'top') {
+    const p = tablePoint(e);
+    // Ball in hand: grabbing the white moves it
+    if (p && canPlace() && Math.hypot(p.x - cue.x, p.z - cue.z) < cue.r * 2.5) {
+      placing = true; el.style.cursor = 'grabbing';
+      el.setPointerCapture(e.pointerId);
+      placeCue(p);
+      return;
+    }
+    // Pressing anywhere else gets you down on the shot
+    autoAim();
+    setView('cue');
+  }
+  gesture = { x0: e.clientX, y0: e.clientY, lastX: e.clientX, mode: null };
+  power = 0; updatePower();
+  el.setPointerCapture(e.pointerId);
+});
+
+const release = () => {
+  if (placing) { placing = false; el.style.cursor = ''; return; }
+  if (!gesture) return;
+  const take = gesture.mode === 'power' && power > 0.02;
+  gesture = null;
+  if (take && state === 'aim') shoot();
+  else { power = 0; updatePower(); }
+};
+el.addEventListener('pointerup', release);
+el.addEventListener('pointercancel', () => { placing = false; gesture = null; power = 0; updatePower(); });
+
+function setView(v) {
+  view = v;
+  updateUI();
+}
+
+// --- Spin dial: where the cue tip will hit the white ---
+// spin.x: -1 (far left) .. 1 (far right), spin.y: -1 (bottom = back spin) .. 1 (top = top spin)
+const spin = { x: 0, y: 0 };
+const spinBall = document.getElementById('spinBall'), spinDot = document.getElementById('spinDot');
+function setSpin(x, y) {
+  const d = Math.hypot(x, y);
+  if (d > 1) { x /= d; y /= d; }          // keep it on the ball
+  spin.x = x; spin.y = y;
+  spinDot.style.left = (50 + x * 40) + '%';
+  spinDot.style.top = (50 - y * 40) + '%';
+  const up = y > 0.15 ? 'Top' : y < -0.15 ? 'Screw' : '';
+  const sideTxt = x > 0.15 ? 'right' : x < -0.15 ? 'left' : '';
+  document.getElementById('spinLabel').textContent =
+    up && sideTxt ? up + ' + ' + sideTxt : up || (sideTxt ? sideTxt[0].toUpperCase() + sideTxt.slice(1) + ' side' : 'Centre');
+}
+function spinFromPointer(e) {
+  const r = spinBall.getBoundingClientRect();
+  setSpin(((e.clientX - r.left) / r.width * 2 - 1) / 0.8, -((e.clientY - r.top) / r.height * 2 - 1) / 0.8);
+}
+let spinDragging = false;
+spinBall.addEventListener('pointerdown', e => { audioInit(); spinDragging = true; spinBall.setPointerCapture(e.pointerId); spinFromPointer(e); e.stopPropagation(); });
+spinBall.addEventListener('pointermove', e => { if (spinDragging) spinFromPointer(e); });
+spinBall.addEventListener('pointerup', () => { spinDragging = false; });
+spinBall.addEventListener('dblclick', () => setSpin(0, 0));
+
+// Ball in hand is allowed on the break and after most fouls (in baulk); free play lets you move it anywhere, any time
+const canPlace = () => !!game.ballInHand;
+function placeCue(p) {
+  const r = cue.r;
+  const maxX = game.ballInHand === 'anywhere' ? HX - r : baulkX();
+  const x = Math.max(-HX + r, Math.min(maxX, p.x));
+  const z = Math.max(-HZ + r, Math.min(HZ - r, p.z));
+  // don't let it sit on top of another ball
+  if (balls.some(b => b !== cue && !b.potted && Math.hypot(b.x - x, b.z - z) < b.r + r)) return;
+  cue.x = x; cue.z = z;
+  cue.mesh.position.set(x, r, z);
+}
+
+addEventListener('keydown', () => audioInit(), true);
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('select')) return;
+  if (state !== 'aim' || game.over) return;
+  // With ball in hand you can pop back up (V or Esc) to move the white again
+  if ((e.key === 'v' || e.key === 'V' || e.key === 'Escape') && canPlace() && view === 'cue') { setView('top'); return; }
+  if ((e.key === 'v' || e.key === 'V') && view === 'top') { autoAim(); setView('cue'); return; }
+  const k = e.key.toLowerCase();
+  if (view === 'cue' && 'wasdx'.includes(k) && k.length === 1) {
+    if (k === 'x') setSpin(0, 0);
+    else setSpin(spin.x + (k === 'd' ? 0.2 : k === 'a' ? -0.2 : 0), spin.y + (k === 'w' ? 0.2 : k === 's' ? -0.2 : 0));
+    return;
+  }
+  if (view !== 'cue' || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  e.preventDefault();
+  // left turns the aim left, right turns it right (0.1° a press, 1° with Shift)
+  turnAim((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 1 : 0.1) * Math.PI / 180);
+});
+
+// ================================================================
+// SOUND (all made in code with the Web Audio API – no sound files)
+// ================================================================
+// Each sound is a few short "voices": a tone (oscillator) and/or a burst of filtered noise, each with a
+// volume envelope that jumps up and dies away. Harder hits = louder and brighter.
+// Sounds are panned left/right by where they are relative to the camera, and get quieter with distance.
+const sound = { ctx: null, on: true, master: null, noise: null, rollGain: null, lastClick: 0 };
+try { sound.on = localStorage.getItem('pool-sound') !== 'off'; } catch (e) {}
+
+function audioInit() {
+  if (sound.ctx) { if (sound.ctx.state === 'suspended') sound.ctx.resume(); return; }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = sound.ctx = new AC();
+    sound.master = ctx.createGain();
+    sound.master.gain.value = sound.on ? 0.9 : 0;
+    sound.master.connect(ctx.destination);
+    // one second of white noise, reused by every noisy sound
+    const buf = sound.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // the rolling rumble: noise through a low filter, always running, volume follows the balls
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
+    sound.rollGain = ctx.createGain(); sound.rollGain.gain.value = 0;
+    src.connect(lp).connect(sound.rollGain).connect(sound.master);
+    src.start();
+  } catch (e) { sound.ctx = null; }
+}
+const audioReady = () => sound.ctx && sound.ctx.state === 'running' && sound.on;
+
+// Where a sound is relative to the listener (the camera): pan -1 (left) .. 1 (right), and a distance fade
+const camSpace = new THREE.Vector3();
+function placeSound(x, z) {
+  camSpace.set(x, 0.03, z).applyMatrix4(camera.matrixWorldInverse);
+  const pan = Math.max(-1, Math.min(1, camSpace.x / (Math.abs(camSpace.z) + 0.4))) * 0.7;
+  const flat = Math.hypot(x - camera.position.x, z - camera.position.z);   // ignore height, so the top view isn't silent
+  return { pan, fade: 1 / (1 + flat * 0.3) };
+}
+
+// Plumbing for one sound: returns a node to plug voices into, already panned and faded
+function out(x, z, vol) {
+  const ctx = sound.ctx, { pan, fade } = placeSound(x, z);
+  const g = ctx.createGain(); g.gain.value = vol * fade;
+  if (ctx.createStereoPanner) {
+    const p = ctx.createStereoPanner(); p.pan.value = pan;
+    g.connect(p).connect(sound.master);
+  } else g.connect(sound.master);
+  return g;
+}
+// A tone that slides from f1 to f2 and dies away over `len` seconds
+function tone(dest, t, f1, f2, len, vol, type = 'sine') {
+  const ctx = sound.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f1, t);
+  o.frequency.exponentialRampToValueAtTime(f2, t + len);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(g).connect(dest);
+  o.start(t); o.stop(t + len + 0.02);
+}
+// A burst of noise through a filter (bandpass = "clicky", lowpass = "thuddy")
+function burst(dest, t, type, freq, q, len, vol) {
+  const ctx = sound.ctx, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = sound.noise;
+  f.type = type; f.frequency.value = freq; f.Q.value = q;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  src.connect(f).connect(g).connect(dest);
+  src.start(t, Math.random() * 0.5); src.stop(t + len + 0.02);
+}
+
+// Cue tip on the white: a short leathery "tock"
+function sfxStrike(pw, x, z) {
+  if (!audioReady()) return;
+  const t = sound.ctx.currentTime, o = out(x, z, 0.35 + pw * 0.65);
+  burst(o, t, 'bandpass', 1400 + pw * 1400, 0.9, 0.045, 0.6);
+  tone(o, t, 700, 320, 0.05, 0.35, 'triangle');
+}
+// Ball on ball: the sharp clack. speed = how fast they came together (m/s)
+function sfxClick(speed, x, z) {
+  if (!audioReady() || speed < 0.04) return;
+  const t = sound.ctx.currentTime;
+  const loud = Math.min(1, speed / 3) ** 0.7;
+  // don't machine-gun: skip a quieter click that lands right on top of the last one
+  if (t - sound.lastClick < 0.01 && loud < 0.5) return;
+  sound.lastClick = t;
+  const o = out(x, z, loud);
+  const pitch = 2600 + loud * 1400 + Math.random() * 300;
+  tone(o, t, pitch, pitch * 0.92, 0.03 + loud * 0.02, 0.5);
+  burst(o, t, 'bandpass', 4200, 1.4, 0.018, 0.5);
+}
+// Ball into a cushion: a soft rubbery thump
+function sfxThud(speed, x, z) {
+  if (!audioReady() || speed < 0.05) return;
+  const t = sound.ctx.currentTime, loud = Math.min(1, speed / 3) ** 0.8;
+  const o = out(x, z, loud * 0.8);
+  tone(o, t, 150, 70, 0.11, 0.7);
+  burst(o, t, 'lowpass', 700, 0.7, 0.06, 0.4);
+}
+// Ball into a pocket: a knock or two on the way in, then a low rumble as it rolls away under the table
+function sfxDrop(speed, x, z) {
+  if (!audioReady()) return;
+  const t = sound.ctx.currentTime, loud = 0.45 + Math.min(1, speed / 2) * 0.55;
+  const o = out(x, z, loud);
+  tone(o, t, 240, 120, 0.07, 0.6);
+  burst(o, t, 'lowpass', 900, 0.8, 0.05, 0.35);
+  tone(o, t + 0.11, 190, 95, 0.08, 0.4);
+  burst(o, t + 0.16, 'lowpass', 260, 0.6, 0.55, 0.22);   // rolling down the return
+}
+// Rolling: the faint rumble of balls on cloth, louder the more is moving
+function sfxRolling() {
+  if (!sound.ctx || !sound.rollGain) return;
+  let total = 0;
+  if (state === 'moving') for (const b of balls) if (!b.potted) total += Math.hypot(b.vx, b.vz);
+  const target = sound.on ? Math.min(0.16, total * 0.035) : 0;
+  sound.rollGain.gain.setTargetAtTime(target, sound.ctx.currentTime, 0.08);
+}
+
+const soundBtn = document.getElementById('soundBtn');
+soundBtn.setAttribute('aria-pressed', sound.on);
+soundBtn.addEventListener('click', () => {
+  audioInit();
+  sound.on = !sound.on;
+  soundBtn.setAttribute('aria-pressed', sound.on);
+  if (sound.master) sound.master.gain.value = sound.on ? 0.9 : 0;
+  try { localStorage.setItem('pool-sound', sound.on ? 'on' : 'off'); } catch (e) {}
+});
+
+function updatePower() { document.getElementById('powerFill').style.width = (power * 100) + '%'; }
+
+document.getElementById('rackBtn').addEventListener('click', () => newFrame(game.breaker));
+
+// ================================================================
+// 8. CAMERA FIT, DRAWING AND THE MAIN LOOP
+// ================================================================
+function fitCamera() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+// Where the camera sits for each view. A "pose" = position, the point it looks at, which way is up, and zoom (fov).
+const topPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), up: new THREE.Vector3(), fov: 10 };
+const cuePose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), fov: 50 };
+
+function updateTopPose() {
+  // High overhead with a narrow view, so it looks almost flat. On a tall phone screen the table turns sideways.
+  const aspect = camera.aspect, portrait = aspect < 0.9;
+  topPose.up.set(portrait ? 1 : 0, 0, portrait ? 0 : -1);
+  const tw = (portrait ? W : L) + 2 * (CUSHION + RAIL) + 0.08;
+  const th = (portrait ? L : W) + 2 * (CUSHION + RAIL) + 0.08;
+  const half = Math.tan(THREE.MathUtils.degToRad(topPose.fov / 2));
+  topPose.pos.set(0, Math.max(th / 2, tw / 2 / aspect) / half, 0);
+  topPose.look.set(0, 0, 0);
+}
+
+function updateCuePose() {
+  // Low behind the cue ball, eyes just above the cue, looking along the aim line
+  const back = 0.62, height = 0.16, ahead = 0.9;
+  cuePose.pos.set(cue.x - aim.x * back, cue.r + height, cue.z - aim.z * back);
+  cuePose.look.set(cue.x + aim.x * ahead, 0, cue.z + aim.z * ahead);
+  cuePose.fov = camera.aspect < 0.9 ? 64 : 50;   // a bit wider on a phone
+}
+
+// camBlend runs from 0 (top) to 1 (cue). We ease it so the swoop starts and ends gently.
+let camBlend = 0;
+const SWOOP_TIME = 0.75;   // seconds for the camera to swoop up or down
+let frozen = false;        // while true the normal cue-view pose is left alone (the chase cam is driving it)
+
+// --- Chase cam: after the shot the camera rides along behind the cue ball ---
+// As soon as the white hits a ball, the camera switches to following THAT ball instead.
+// It points the way its ball is travelling, but turns smoothly so bounces don't jerk the view.
+// It stays down until that ball has nearly stopped (or dropped in a pocket), then rises to watch the rest.
+const CHASE_MIN = 1.2, CHASE_MAX = 6;   // seconds: always follow at least this long, never longer than that
+let chasing = false, chaseTime = 0, chasePotted = 0;
+const chaseDir = new THREE.Vector3(), chaseWant = new THREE.Vector3();
+function startChase() {
+  chasing = true; chaseTime = 0; chasePotted = 0;
+  chaseDir.set(aim.x, 0, aim.z);
+}
+function updateChase(dt) {
+  chaseTime += dt;
+  const b = (shot && shot.firstBall) || cue;   // the white until it hits something, then the ball it hit
+  // where the ball is: if it's dropping into a pocket, use the pocket so the camera watches it go in
+  const f = falling.find(q => q.b === b);
+  const bx = f ? f.p.x : b.x, bz = f ? f.p.z : b.z;
+  const speed = Math.hypot(b.vx, b.vz);
+  if (b.potted) chasePotted += dt;
+  if ((speed < 0.12 && !b.potted && chaseTime > CHASE_MIN) || chaseTime > CHASE_MAX || chasePotted > 0.9) { chasing = false; return; }
+  // Turn the camera's heading towards the direction its ball is moving (only when it's moving properly)
+  if (speed > 0.05 && !b.potted) {
+    chaseWant.set(b.vx / speed, 0, b.vz / speed);
+    chaseDir.lerp(chaseWant, 1 - Math.exp(-dt * 2.5)).normalize();
+  }
+  // Ease the camera towards a spot behind and above the ball, looking a little ahead of it
+  const follow = 1 - Math.exp(-dt * 7);   // bigger number = camera sticks closer to the ball
+  chaseWant.set(bx - chaseDir.x * 0.75, b.r + 0.24, bz - chaseDir.z * 0.75);
+  cuePose.pos.lerp(chaseWant, follow);
+  chaseWant.set(bx + chaseDir.x * 0.5, 0, bz + chaseDir.z * 0.5);
+  cuePose.look.lerp(chaseWant, follow);
+}
+let pendingView = null;    // the view to go to next, once the camera has risen
+const ease = t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+const tmpUp = new THREE.Vector3(), aimFwd = new THREE.Vector3(), upLow = new THREE.Vector3(0, 1, 0);
+const smooth = (a, b, t) => { const x = Math.min(1, Math.max(0, (t - a) / (b - a))); return x * x * (3 - 2 * x); };
+function updateCamera(dt) {
+  let goal;
+  if (state === 'moving') {
+    // Just after the shot: ride along behind the white, then rise
+    if (chasing) updateChase(dt);
+    goal = chasing ? 1 : 0;
+  } else if (pendingView) {
+    // Balls have stopped: finish rising first, then head for the next view
+    goal = 0;
+    if (camBlend === 0) {
+      frozen = false;
+      if (pendingView === 'cue') autoAim();
+      view = pendingView; pendingView = null;
+      updateUI();
+    }
+  } else goal = view === 'cue' && !game.over && !cue.potted ? 1 : 0;
+  camBlend += Math.sign(goal - camBlend) * Math.min(Math.abs(goal - camBlend), dt / SWOOP_TIME);
+  updateTopPose();
+  if (!frozen) updateCuePose();
+  const k = ease(camBlend);
+  camera.position.lerpVectors(topPose.pos, cuePose.pos, k);
+  // Which way is "up" on screen: first turn (while still high) so the aim line points up the screen,
+  // then tip forward into the cue view. Doing the turn first stops the table twisting mid-swoop.
+  aimFwd.set(cuePose.look.x - cuePose.pos.x, 0, cuePose.look.z - cuePose.pos.z).normalize();
+  if (k < 0.5) tmpUp.lerpVectors(topPose.up, aimFwd, smooth(0, 0.5, k));
+  else tmpUp.lerpVectors(aimFwd, upLow, smooth(0.5, 1, k));
+  tmpUp.normalize();
+  camera.up.copy(tmpUp);
+  camera.lookAt(tmpUp.lerpVectors(topPose.look, cuePose.look, k));
+  camera.fov = topPose.fov + (cuePose.fov - topPose.fov) * k;
+  camera.updateProjectionMatrix();
+}
+const resizer = new ResizeObserver(fitCamera);
+resizer.observe(stage);
+
+// Copy physics positions onto the 3D balls, and roll them so the numbers turn naturally
+const spinAxis = new THREE.Vector3(), spinQ = new THREE.Quaternion(), upAxis = new THREE.Vector3(0, 1, 0);
+function syncMeshes(dt = 0) {
+  for (const b of balls) {
+    if (b.potted) continue;
+    b.mesh.position.set(b.x, b.r, b.z);
+    // Turn the ball by its spin, not its movement, so you can see a skidding ball slide without turning
+    const spin = Math.hypot(b.ux, b.uz);
+    if (spin > 0 && dt > 0) {
+      spinAxis.set(b.uz, 0, -b.ux).normalize();       // roll axis is sideways to the spin direction
+      spinQ.setFromAxisAngle(spinAxis, spin * dt / b.r); // rolling distance ÷ radius = angle turned
+      b.mesh.quaternion.premultiply(spinQ);
+    }
+    if (b.side && dt > 0) {   // side spin turns it like a top
+      spinQ.setFromAxisAngle(upAxis, b.side * dt / b.r);
+      b.mesh.quaternion.premultiply(spinQ);
+    }
+  }
+}
+
+// Pot animation: the ball slides over to the middle of the hole while it starts to drop,
+// then falls the rest of the way, getting darker as it goes down into the pocket
+function updateFalling(dt) {
+  for (const f of falling) {
+    f.t += dt / FALL_TIME;
+    const k = Math.min(1, f.t);
+    const across = 1 - (1 - Math.min(1, k / 0.5)) ** 2;   // eases into the centre in the first half
+    const down = k * k;                                    // falls slowly at first, then faster, like gravity
+    const b = f.b, m = b.mesh;
+    m.position.set(f.x0 + (f.p.x - f.x0) * across, b.r - (POCKET_DEPTH - b.r) * down - 0.001, f.z0 + (f.p.z - f.z0) * across);
+    // keep it turning a little the way it was rolling
+    const spin = Math.hypot(f.spinX, f.spinZ);
+    if (spin > 0) {
+      spinAxis.set(f.spinZ, 0, -f.spinX).normalize();
+      spinQ.setFromAxisAngle(spinAxis, spin * dt * (1 - k) / b.r);
+      m.quaternion.premultiply(spinQ);
+    }
+    m.material.color.setScalar(1 - 0.85 * k);   // fade into the dark of the pocket
+    m.scale.setScalar(1 - 0.22 * down);          // shrink a touch, so from above it looks like it's falling away
+    if (k >= 1) m.visible = false;
+  }
+  falling = falling.filter(f => f.t < 1);
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  if (state === 'moving') {
+    for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
+    syncMeshes(dt);
+    if (!anyMoving()) { finishShot(); syncMeshes(); }
+  }
+  updateFalling(dt);
+  updateAimVisuals();
+  updateCamera(dt);
+  sfxRolling();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// Table size picker: remembers your choice in this browser if it can
+const tableSel = document.getElementById('tableSel');
+tableSel.innerHTML = Object.entries(TABLES).map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
+let startKey = 'uk7';
+try { const saved = localStorage.getItem('pool-table'); if (TABLES[saved]) startKey = saved; } catch (e) {}
+tableSel.value = startKey;
+function useTable(key) {
+  applySpec(key);
+  buildTable();
+  newFrame(game.breaker);
+  fitCamera();
+  try { localStorage.setItem('pool-table', key); } catch (e) {}
+}
+tableSel.addEventListener('change', () => useTable(tableSel.value));
+
+// Rules picker
+const rulesSel = document.getElementById('rulesSel');
+rulesSel.innerHTML = Object.entries(RULESETS).map(([k, r]) => `<option value="${k}">${r.name}</option>`).join('');
+let rulesKey = 'blackball';
+try { const saved = localStorage.getItem('pool-rules'); if (RULESETS[saved]) rulesKey = saved; } catch (e) {}
+rulesSel.value = rulesKey;
+RULE = RULESETS[rulesKey];
+rulesSel.addEventListener('change', () => {
+  RULE = RULESETS[rulesSel.value];
+  for (const p of game.players) p.frames = 0;
+  try { localStorage.setItem('pool-rules', rulesSel.value); } catch (e) {}
+  useTable(tableSel.value);
+});
+document.getElementById('nextBtn').addEventListener('click', () => newFrame(1 - game.breaker));
+
+useTable(startKey);
+requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
