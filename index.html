@@ -1441,7 +1441,7 @@ addEventListener('keydown', e => {
 //   - No spam: the same pair of balls (or ball and cushion) can't re-sound within 60 ms unless it's
 //     much harder, and only so many quiet hits can sound at once. Resting balls nudging make no noise.
 // Your friend's shot, played back on your table online, runs the same physics, so you hear it too.
-const sound = { ctx: null, on: true, vol: 0.8, master: null, bank: {}, rollGain: null, rollLp: null, gullyGain: null,
+const sound = { ctx: null, on: true, vol: 0.8, master: null, bank: {},
                 at: 0, recent: [], last: new Map(), lastTake: {} };
 try {
   sound.on = localStorage.getItem('pool-sound') !== 'off';
@@ -1466,17 +1466,6 @@ function audioInit() {
     room.buffer = roomEcho(ctx); wet.gain.value = 0.1;
     sound.master.connect(room).connect(wet).connect(lim);
     buildBank();
-    // two always-running rumbles whose volume follows what's moving: balls on the cloth, and balls in the gully
-    const loop = render(2, (d, sr) => { for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }, false);
-    const rumble = (freq, q) => {
-      const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
-      src.buffer = loop; src.loop = true; src.playbackRate.value = 0.8 + Math.random() * 0.4;
-      lp.type = 'lowpass'; lp.frequency.value = freq; lp.Q.value = q; g.gain.value = 0;
-      src.connect(lp).connect(g).connect(sound.master); src.start();
-      return [g, lp];
-    };
-    [sound.rollGain, sound.rollLp] = rumble(260, 0.7);
-    [sound.gullyGain] = rumble(420, 2.5);
   } catch (e) { sound.ctx = null; }
 }
 // Start sound on the first tap or key press anywhere (browsers won't play sound before that)
@@ -1583,9 +1572,9 @@ function buildBank() {
     pulse(d, sr, 0.0009, 0.35 * h, 0.0015);                               // the rail
     ring(d, sr, [[rnd(110, 140), 0.012, 0.3]]);
   });
-  // Ball into a pocket: a knock on the leather/wood as it drops, a second as it lands on the runway,
-  // then the hollow rumble of rolling away inside the table towards the ball return
-  bank.pocket = levels([0.3, 1], 3, 0.95, (d, sr, h) => {
+  // Ball into a pocket: a knock on the leather/wood as it drops, and a second as it lands on the runway
+  // (no rolling sounds anywhere: Oscar asked for them to go)
+  bank.pocket = levels([0.3, 1], 3, 0.25, (d, sr, h) => {
     hiss(d, sr, 'lp', 900, 0.8, 0.008, 0.5);
     pulse(d, sr, 0.0022, 1);
     ring(d, sr, [[rnd(170, 200), 0.015, 0.5], [rnd(380, 450), 0.006, 0.3]]);
@@ -1593,14 +1582,6 @@ function buildBank() {
     hiss(d, sr, 'lp', 700, 0.8, 0.007, 0.4, at);
     pulse(d, sr, 0.0028, 0.7, at);
     ring(d, sr, [[rnd(140, 165), 0.015, 0.35, 0, at]]);
-    // rolling away: low noise in a wooden channel, wobbling a little as the ball turns
-    const i0 = Math.floor((at + 0.04) * sr), n = d.length - i0, x = new Float32Array(n), wob = rnd(11, 16);
-    for (let i = 0; i < n; i++) {
-      const t = i / sr, env = Math.min(1, t / 0.08) * Math.max(0, 1 - t / (n / sr));
-      x[i] = (Math.random() * 2 - 1) * env * (0.8 + 0.2 * Math.sin(2 * Math.PI * wob * t));
-    }
-    biquad(x, sr, 'bp', rnd(170, 210), 3); biquad(x, sr, 'lp', 500, 0.7);
-    for (let i = 0; i < n; i++) d[i0 + i] += 1.6 * x[i];
   });
   // Wooden knock: a ball reaching the end of the ball return, or dropping out of the chute into it
   bank.knock = levels([0.3, 1], 3, 0.12, (d, sr, h) => {
@@ -1684,17 +1665,6 @@ function sfxRack(speed, end) {
 }
 // Ball return: a ball dropping out of the chute onto the gully
 const sfxChute = () => play('knock', 0.2, 0.12);
-// Rolling: the soft rumble of balls on the cloth, louder and a little brighter the more is moving.
-// gully = how fast balls are rolling along the ball return.
-function sfxRolling(gully) {
-  if (!sound.ctx || !sound.rollGain) return;
-  let total = 0;
-  if (state === 'moving' && !admin.sim) for (const b of balls) if (!b.potted) total += Math.hypot(b.vx, b.vz);
-  const t = sound.ctx.currentTime;
-  sound.rollGain.gain.setTargetAtTime(Math.min(0.2, total * 0.04), t, 0.08);
-  sound.rollLp.frequency.setTargetAtTime(180 + Math.min(400, total * 70), t, 0.1);
-  sound.gullyGain.gain.setTargetAtTime(Math.min(0.12, gully * 0.012), t, 0.05);
-}
 
 // Sound button = mute on/off; the slider beside it sets the volume
 const soundBtn = document.getElementById('soundBtn'), volSlider = document.getElementById('volSlider');
@@ -1963,9 +1933,7 @@ function rackBall(n) {
   rackTrack.appendChild(el);
   return { el, face };
 }
-let rackRolling = 0;   // how fast balls are rolling along the gully this frame (for the rumble)
 function updateRack(dt) {
-  rackRolling = 0;
   rackQueue = Math.max(0, rackQueue - dt);
   if (rackSet !== RULE.ballSet) { for (const it of rackItems.values()) it.el.remove(); rackItems.clear(); rackSet = RULE.ballSet; }
   const potted = balls.filter(b => b.potted && b.n !== 0).sort((a, b) => (a.potIdx || 0) - (b.potIdx || 0) || a.n - b.n);
@@ -1990,7 +1958,6 @@ function updateRack(dt) {
     } else if (it.x > it.target + 0.0005 || it.v !== 0) {   // the gully slopes down to the left
       it.v = Math.max(-11, it.v - 16 * dt);
       it.x += it.v * dt;
-      rackRolling += -it.v;
       if (it.x <= it.target) {   // bumped the ball in front (or the end): a little bounce, then settle
         sfxRack(-it.v, it.target === 0);
         it.x = it.target;
@@ -2034,7 +2001,6 @@ function frame(now) {
   updateRack(dt);
   updateAimVisuals();
   updateCamera(dt);
-  sfxRolling(rackRolling);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
