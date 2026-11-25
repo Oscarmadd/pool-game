@@ -314,9 +314,10 @@ const RULESETS = {
       }
       if (foul) return { result: 'foul', foul, cue: s.cuePotted ? 'baulk' : 'baulk-optional' };
 
-      // ---- Deciding groups: first legal pot of a single colour on an open table (not on a free shot) ----
+      // ---- Deciding groups: the first legal pot of a single colour after the break decides them,
+      //      free shots included (a pot on the free shot after a foul counts like any other pot) ----
       let msg = '';
-      if (open && !g.freeShot && colours.length) {
+      if (open && colours.length) {
         const kinds = [...new Set(colours.map(groupOf))];
         if (kinds.length === 1) {
           me.group = kinds[0];
