@@ -152,7 +152,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <p class="small" id="netNote">Uses the free PeerJS service to find each other, then the game runs directly between your two browsers. Nothing is stored anywhere.</p>
   </div></div>
   <div id="admin" hidden role="dialog" aria-labelledby="admTitle">
-    <h2><span id="admTitle">Admin</span> <small>local games only</small><span class="grow"></span><button id="admClose" aria-label="Close admin panel">Close</button></h2>
+    <h2><span id="admTitle">Admin</span> <small id="admSub">testing tools</small><span class="grow"></span><button id="admClose" aria-label="Close admin panel">Close</button></h2>
     <section><h3>Turn</h3>
       <div class="row"><span class="lbl">To play</span><button id="admTurn0">Player 1</button><button id="admTurn1">Player 2</button></div>
       <div class="row" id="admGroupRow" style="margin-top:6px"><span class="lbl">Groups</span><select id="admGroups"></select></div>
@@ -1043,8 +1043,8 @@ const anyMoving = () => balls.some(b => !b.potted && Math.hypot(b.vx, b.vz) + Ma
 // ================================================================
 function shoot() {
   // Everything the shot depends on. Online, this is sent to the other player so their table plays it too.
-  const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y };
-  adminSnapshot();   // admin panel: lets you undo this shot (local games only)
+  // ps = the admin panel's max power setting; it's sent with the shot so your friend's table plays it the same
+  const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y, ps: admin.powerScale };
   netSendShot(p);
   strike(p);
   frozen = true; startChase();
@@ -1055,6 +1055,7 @@ function shoot() {
 
 // Hit the white: p = aim direction (ax, az), power 0..1, and where the tip hits (sx, sy, -1..1)
 function strike(p) {
+  adminSnapshot();   // admin panel: lets you undo this shot (yours, or your friend's when you're watching it)
   sfxStrike(p.power, cue.x, cue.z);
   launchCue(p);
   // Everything the rules need to know about this shot gets recorded in here as it plays out
@@ -1068,7 +1069,7 @@ function strike(p) {
 
 // Set the white moving for shot p (also used by the admin panel's shot finder to try shots out)
 function launchCue(p) {
-  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (net.on ? 1 : admin.powerScale);   // curve gives finer control on soft shots
+  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (p.ps > 0 ? Math.min(2, p.ps) : 1);   // curve gives finer control on soft shots
   // Where the tip hits the white, as a fraction of its radius (sx = right of centre, sy = above centre)
   const tipX = p.sx * MAX_TIP, tipY = p.sy * MAX_TIP;
   // Side spin squirts the white slightly the opposite way to the side you hit
@@ -1718,7 +1719,7 @@ function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
   if (state === 'moving' && !(net.watch && net.watch.done)) {
-    physTime += dt * (net.on ? 1 : admin.timeScale);   // admin panel slow motion (local only)
+    physTime += dt * admin.timeScale;   // admin panel slow motion (just on your own screen)
     let stopped = false;
     for (let i = 0; physTime >= PHYS_H && i < 40; i++) {
       physTime -= PHYS_H;
@@ -1897,6 +1898,7 @@ function onData(m) {
         else netSend(fullState());
         break;
       case 'sync': applySync(m); break;
+      case 'admin': applyAdmin(m); break;   // they changed the table with the admin panel
       case 'aim':    // the other player lining up: move their cue (and the white, with ball in hand)
         if (myTurn() || state !== 'aim') break;
         aim = { x: m.ax, z: m.az }; power = m.power; updatePower(); setSpin(m.sx, m.sy);
@@ -2178,8 +2180,9 @@ document.getElementById('nextBtn').addEventListener('click', () => {
 // ================================================================
 // 10. ADMIN PANEL (testing tools) – type the Konami code during a game to open it:
 //     ↑ ↑ ↓ ↓ ← → ← → B A Enter. Type it again (or Esc) to close.
-// It only works in local games: online, changes on one table would make the two tables disagree, and it
-// would let one player cheat. Slow motion and max power go back to normal whenever you're online.
+// Online, either player can use it between shots. Every change is sent straight to the other table (see
+// adminSend), and the other player is told it happened. Max power travels with each shot so both tables
+// play it the same; slow motion only slows your own screen.
 // ================================================================
 const admin = { sim: false, open: false, timeScale: 1, powerScale: 1, moving: false, drag: null, snap: null, pos: 0, fps: 0 };
 const admEl = id => document.getElementById(id);
@@ -2199,7 +2202,6 @@ addEventListener('keydown', e => {
 }, true);
 
 function adminOpen(on) {
-  if (on && net.on) { setReport('<strong>The admin panel only works in local games.</strong>'); return; }
   admin.open = on;
   admEl('admin').hidden = !on;
   if (!on) { adminMoveMode(false); if (finder.run) finderStop(''); }
@@ -2208,8 +2210,40 @@ function adminOpen(on) {
 admEl('admClose').addEventListener('click', () => adminOpen(false));
 
 // Anything that changes the rules state can only happen between shots
-const admCanEdit = () => admin.open && !net.on && state === 'aim';
-function adminChanged() { updateUI(); adminRefresh(); }
+// Online, either player can use it between shots (not while a shot is running or you're still waiting for its result)
+const admCanEdit = () => admin.open && state === 'aim' && !net.watch && (!net.on || net.connected);
+function adminChanged() { updateUI(); adminRefresh(); adminSend(); }
+
+// Online: every change goes straight to your friend's table (the whole table and score, like a sync) and
+// counts as a new decision (net.seq), so nothing played from the old table can be applied by mistake.
+function adminSend() {
+  if (!net.on || !net.connected) return;
+  net.seq++;
+  netSend({ ...fullState(), t: 'admin', by: net.me });
+}
+// Their change arrives: take their table and score, but leave our camera and aim where they are
+function applyAdmin(m) {
+  // We'd already shot from the old table when their change arrived: our shot wins, and once it stops we
+  // send them the whole table so they catch up
+  if (state === 'moving' && !net.watch) { net.syncAfterShot = true; return; }
+  if (net.watch) { net.watch = null; state = 'aim'; chasing = false; frozen = false; }
+  falling = [];
+  applyBalls(m.balls);
+  for (const b of balls) { b.mesh.visible = !b.potted; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
+  shotCount = m.shotCount;
+  const g = m.game;
+  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, ballInHand: g.ballInHand, over: g.over });
+  game.players.forEach((p, i) => { p.group = g.players[i].group; p.frames = g.players[i].frames | 0; });
+  net.seq = m.seq;
+  if (m.over) { netEl('overTitle').textContent = m.over.title; netEl('overWhy').textContent = m.over.why; netEl('overScore').textContent = m.over.score; }
+  netEl('over').hidden = !g.over;
+  // Only move the camera if we now have to place the white (or it stopped being our turn)
+  if (view === 'cue' && (!myTurn() || (game.ballInHand && game.ballInHand !== 'baulk-optional'))) { looking = false; gesture = null; setView('top'); }
+  const who = game.players[m.by === 0 || m.by === 1 ? m.by : 1 - net.me].name;
+  setReport('<strong>' + cleanName(who, 'Your friend') + ' changed the table with the admin panel.</strong>');
+  finder.found = null;
+  updateUI(); adminRefresh();
+}
 
 // ---- Turn, groups, free shot, ball in hand ----
 for (const i of [0, 1]) admEl('admTurn' + i).addEventListener('click', () => {
@@ -2278,7 +2312,7 @@ admEl('admClear').addEventListener('click', () => {
   game.isBreak = false;
   adminChanged();
 });
-admEl('admRack').addEventListener('click', () => { if (admin.open && !net.on) { newFrame(game.breaker); adminBuildBalls(); adminRefresh(); } });
+admEl('admRack').addEventListener('click', () => { if (admCanEdit()) { newFrame(game.breaker); adminBuildBalls(); adminChanged(); } });
 
 // Move balls: drag any ball around in the top view. While it's on, presses on the table only move balls.
 function adminMoveMode(on) {
@@ -2293,7 +2327,7 @@ function adminBallAt(p) {
   return best;
 }
 el.addEventListener('pointerdown', e => {
-  if (!admin.moving || net.on) return;
+  if (!admin.moving) return;
   e.stopImmediatePropagation();
   if (state !== 'aim' || view !== 'top' || camBlend > 0) return;
   const p = tablePoint(e), b = p && adminBallAt(p);
@@ -2302,7 +2336,7 @@ el.addEventListener('pointerdown', e => {
   el.setPointerCapture(e.pointerId); el.style.cursor = 'grabbing';
 }, true);
 el.addEventListener('pointermove', e => {
-  if (!admin.moving || net.on) return;
+  if (!admin.moving) return;
   e.stopImmediatePropagation();
   const p = tablePoint(e); if (!p) return;
   if (!admin.drag) { el.style.cursor = view === 'top' && adminBallAt(p) ? 'grab' : ''; return; }
@@ -2312,20 +2346,19 @@ el.addEventListener('pointermove', e => {
   if (balls.some(q => q !== b && !q.potted && Math.hypot(q.x - x, q.z - z) < q.r + b.r)) return;   // don't overlap
   b.x = x; b.z = z; b.mesh.position.set(x, b.r, z);
 }, true);
-const adminDrop = e => { if (admin.moving && !net.on) { e.stopImmediatePropagation(); if (admin.drag) { admin.drag = null; el.style.cursor = 'grab'; adminRefresh(); } } };
+const adminDrop = e => { if (admin.moving) { e.stopImmediatePropagation(); if (admin.drag) { admin.drag = null; el.style.cursor = 'grab'; adminChanged(); } } };
 el.addEventListener('pointerup', adminDrop, true);
 el.addEventListener('pointercancel', adminDrop, true);
 
 // ---- Undo: put everything back how it was just before the last shot ----
 function adminSnapshot() {
-  if (net.on) { admin.snap = null; return; }
   const r = admEl('report');
   admin.snap = { balls: ballState(), shotCount, aim: { ...aim },
     game: { ...game, players: game.players.map(p => ({ ...p })) }, report: r.innerHTML, foul: r.classList.contains('foul') };
 }
 admEl('admUndo').addEventListener('click', () => {
   const s = admin.snap;
-  if (!s || !admin.open || net.on) return;
+  if (!s || !admin.open || net.watch || (net.on && !net.connected)) return;
   state = 'aim'; physTime = 0; chasing = false; frozen = false; looking = false; glideT = 1; gesture = null;
   falling = [];
   applyBalls(s.balls);
@@ -2379,7 +2412,7 @@ const shotScore = r => r.potted ? (r.cueIn ? 2 : 3) : r.hit ? 2 - Math.min(1, r.
 
 function* findShot(target, needCush, useSpin) {
   const rnd = () => Math.random();
-  const mk = (ang, pw, sx, sy) => ({ ax: Math.cos(ang), az: Math.sin(ang), power: Math.min(1, Math.max(0.05, pw)), sx: useSpin ? sx : 0, sy: useSpin ? sy : 0 });
+  const mk = (ang, pw, sx, sy) => ({ ax: Math.cos(ang), az: Math.sin(ang), power: Math.min(1, Math.max(0.05, pw)), sx: useSpin ? sx : 0, sy: useSpin ? sy : 0, ps: admin.powerScale });
   const tries = [];
   // Straight-in ideas first: aim at the "ghost ball" spot that sends the target at each pocket
   if (needCush === 0) for (const q of POCKETS) {
@@ -2423,7 +2456,7 @@ function finderStop(msg) {
 }
 admEl('admFind').addEventListener('click', () => {
   if (finder.run) { finderStop('Stopped.'); return; }
-  if (!admCanEdit() || game.over || cue.potted) return;
+  if (!admCanEdit() || !myTurn() || game.over || cue.potted) return;
   const target = balls.find(b => b.n === +admEl('admTarget').value && !b.potted);
   if (!target) return;
   const need = +admEl('admCush').value;
@@ -2461,8 +2494,9 @@ function adminLineUp() {
 }
 admEl('admTake').addEventListener('click', () => {
   const f = finder.found;
-  if (!f || !admCanEdit() || game.over || ballState().join('|') !== f.key) return;
+  if (!f || !admCanEdit() || !myTurn() || game.over || ballState().join('|') !== f.key) return;
   aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy); power = f.p.power;
+  admin.powerScale = f.p.ps; admEl('admPower').value = Math.round(f.p.ps * 100); admEl('admPowerVal').textContent = Math.round(f.p.ps * 100) + '%';
   finder.found = null;
   shoot();
   adminRefresh();
@@ -2516,17 +2550,16 @@ function adminRefresh() {
   }
   const busy = !!finder.run;
   ts.disabled = admEl('admCush').disabled = admEl('admSpin').disabled = busy || !edit;
-  admEl('admFind').disabled = !busy && (!edit || game.over || cue.potted || !list.length);
-  admEl('admTake').disabled = busy || !finder.found || !edit || game.over || ballState().join('|') !== finder.found.key;
+  admEl('admFind').disabled = !busy && (!edit || !myTurn() || game.over || cue.potted || !list.length);
+  admEl('admTake').disabled = busy || !finder.found || !edit || !myTurn() || game.over || ballState().join('|') !== finder.found.key;
 }
 
-// Readout, ~6 times a second while the panel is open. Also closes the panel if you go online.
+// Readout, ~6 times a second while the panel is open
 let admFrames = 0, admLast = performance.now();
 function adminTick(now) {
   admFrames++;
   if (now - admLast > 160) {
     admin.fps = admFrames * 1000 / (now - admLast); admFrames = 0; admLast = now;
-    if (admin.open && net.on) adminOpen(false);
     if (admin.open) {
       const live = balls.filter(b => !b.potted);
       const fast = live.reduce((m, b) => Math.max(m, Math.hypot(b.vx, b.vz)), 0);
