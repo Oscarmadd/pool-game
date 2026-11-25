@@ -1270,7 +1270,7 @@ const release = () => {
   if (!gesture) return;
   const take = gesture.mode === 'power' && power > 0.02;
   gesture = null;
-  if (take && state === 'aim') shoot();
+  if (take && state === 'aim') { const pw = power; strokeThrough(pw, () => { power = pw; shoot(); }); }   // the cue comes through, then hits
   else { power = 0; updatePower(); }
 };
 el.addEventListener('pointerup', release);
@@ -2542,19 +2542,67 @@ function adminLineUp() {
   if (admin.moving) adminMoveMode(false);
   aim = { x: f.p.ax, z: f.p.az };
   setSpin(f.p.sx, f.p.sy);
-  power = f.p.power; updatePower();
+  power = 0; updatePower();   // cue rests by the ball; Take the shot draws it back
   looking = false; gesture = null; pendingView = null; frozen = false;
   setView('cue');
 }
+// Take the shot like a person would: get down on it, settle the aim and spin, a couple of small practice
+// strokes, a slow draw back, a short pause, then through. The shot itself is exactly the one that was found.
 admEl('admTake').addEventListener('click', () => {
   const f = finder.found;
-  if (!f || !admCanEdit() || !myTurn() || game.over || ballState().join('|') !== f.key) return;
-  aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy); power = f.p.power;
-  admin.powerScale = f.p.ps; admEl('admPower').value = Math.round(f.p.ps * 100); admEl('admPowerVal').textContent = Math.round(f.p.ps * 100) + '%'; updatePower();
-  finder.found = null;
-  shoot();
+  if (!f || stroke.on || !admCanEdit() || !myTurn() || game.over || ballState().join('|') !== f.key) return;
+  admin.powerScale = f.p.ps; admEl('admPower').value = Math.round(f.p.ps * 100); admEl('admPowerVal').textContent = Math.round(f.p.ps * 100) + '%';
+  if (view !== 'cue' || looking) adminLineUp();
+  const a0 = Math.atan2(aim.z, aim.x), a1 = Math.atan2(f.p.az, f.p.ax), da = Math.atan2(Math.sin(a1 - a0), Math.cos(a1 - a0));
+  const sx0 = spin.x, sy0 = spin.y, p0 = power, pw = f.p.power, feather = Math.min(0.07, pw * 0.4);
+  const setPow = v => { power = v; updatePower(); };
+  runStroke([
+    { wait: () => camBlend >= 1 && glideT >= 1 && !pendingView },                         // camera down on the shot
+    { dur: 700, fn: k => { const a = a0 + da * k; aim = { x: Math.cos(a), z: Math.sin(a) }; setSpin(sx0 + (f.p.sx - sx0) * k, sy0 + (f.p.sy - sy0) * k); setPow(p0 * (1 - k)); } },
+    { dur: 380, fn: k => setPow(feather * k) }, { dur: 380, fn: k => setPow(feather * (1 - k)) },   // practice strokes
+    { dur: 380, fn: k => setPow(feather * k) }, { dur: 380, fn: k => setPow(feather * (1 - k)) },
+    { dur: 250, fn: () => {} },
+    { dur: 900 + pw * 900, fn: k => setPow(pw * k) },                                     // slow draw back
+    { dur: 350, fn: () => {} },                                                          // pause
+  ], () => {
+    aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy);
+    finder.found = null;
+    strokeThrough(pw, () => { aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy); power = pw; shoot(); adminRefresh(); });
+  }, () => state !== 'aim' || game.over || ballState().join('|') !== f.key);
   adminRefresh();
 });
+
+// ---- Cue animation (also used for normal shots: when you let go, the cue comes through before it hits) ----
+// While it runs, the table ignores presses and the aim keys, so nothing can change the shot mid-stroke.
+const stroke = { on: false };
+function runStroke(steps, done, abort) {
+  stroke.on = true;
+  let i = 0, t0 = performance.now();
+  const tick = now => {
+    if (!stroke.on) return;
+    if (abort && abort()) { stroke.on = false; power = 0; updatePower(); return; }
+    const s = steps[i];
+    if (s.wait) { if (!s.wait()) { requestAnimationFrame(tick); return; } }
+    else {
+      const k = Math.min(1, (now - t0) / s.dur);
+      s.fn(s.raw ? k : ease(k));
+      if (k < 1) { requestAnimationFrame(tick); return; }
+    }
+    i++; t0 = now;
+    if (i < steps.length) { requestAnimationFrame(tick); return; }
+    stroke.on = false; done();
+  };
+  requestAnimationFrame(tick);
+}
+// The final push: from drawn back at power pw, speeding up into the ball (harder shots come through faster)
+function strokeThrough(pw, hit) {
+  runStroke([{ dur: 140 - pw * 60, raw: true, fn: k => { power = pw * (1 - k * k); updatePower(); } }], hit, () => state !== 'aim');
+}
+el.addEventListener('pointerdown', e => { if (stroke.on) e.stopImmediatePropagation(); }, true);
+addEventListener('keydown', e => {
+  if (!stroke.on || (e.target.closest && e.target.closest('input, select, textarea'))) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+}, true);
 
 // Pick the finder's target by clicking a ball: from the overhead view (Overview, or the top view before you
 // get down on the shot), clicking any ball but the white picks it and starts looking for a shot on it.
@@ -2631,7 +2679,7 @@ function adminRefresh() {
   const busy = !!finder.run;
   ts.disabled = admEl('admCush').disabled = admEl('admSpin').disabled = busy || !edit;
   admEl('admFind').disabled = !busy && (!edit || !myTurn() || game.over || cue.potted || !list.length);
-  admEl('admTake').disabled = busy || !finder.found || !edit || !myTurn() || game.over || ballState().join('|') !== finder.found.key;
+  admEl('admTake').disabled = busy || stroke.on || !finder.found || !edit || !myTurn() || game.over || ballState().join('|') !== finder.found.key;
 }
 
 // Readout, ~6 times a second while the panel is open
