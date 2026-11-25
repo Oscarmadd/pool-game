@@ -532,6 +532,9 @@ const BALL_BOUNCE = 0.93;  // 1 = perfectly bouncy ball-on-ball hits
 // Throw: where two balls touch, their surfaces rub. Ball-on-ball friction is low and gets lower the
 // faster the surfaces slide past each other (measured values from Dr Dave Alciatore's throw research).
 const THROW_A = 0.00995, THROW_B = 0.108, THROW_C = 1.088;   // grip = A + B x e^(-C x sliding speed)
+// Share of that grip that acts up/down on top/back spin. At full strength it ate about a sixth of every screw
+// shot's draw (and follow), more than a real table, so only a little top/back spin is passed across.
+const THROW_ROLL_GRIP = 0.2;
 // Cushions: the rubber nose touches the ball a little ABOVE its middle, so it grips the spin as well as
 // bouncing the ball back. Bounce gets weaker the harder the ball hits (the rubber can't spring back fully).
 const CUSHION_NOSE = 0.27;      // how far above the ball's centre the nose touches, as a fraction of its radius
@@ -544,6 +547,7 @@ const CUSHION_ROLL_GRIP = 0.25;  // share of that grip acting up/down on top/bac
 const MAX_TIP = 0.5;       // furthest you can hit from the centre, as a fraction of the ball's radius (further = miscue)
 const SIDE_DECAY = 1.5;    // how quickly side spin wears off on the cloth
 const SQUIRT = 0.05;       // how far side spin pushes the white off line (radians at full side)
+const BREAK_BOOST = 1.3;   // the break is struck harder than any other shot: full power on the break goes 30% faster (about 6.8 m/s on the UK table)
 const CUE_ELEVATION = 0.07;// the cue's butt is raised ~4°, so side spin is tilted a little and the white swerves back
 const SUBSTEPS = 10;       // split each frame into small steps so fast balls don't pass through each other
 
@@ -968,7 +972,7 @@ function throwBalls(a, b, nx, nz, kick) {
   const slip = Math.hypot(slipH, slipV);
   if (slip < 1e-6) return;
   const fric = (THROW_A + THROW_B * Math.exp(-THROW_C * slip)) * kick;   // friction impulse available
-  let jH = fric * slipH / slip, jV = fric * slipV / slip;
+  let jH = fric * slipH / slip, jV = fric * THROW_ROLL_GRIP * slipV / slip;
   // gearing limit: a solid ball's surface responds 2.5x more to spin than to movement, hence 3.5 sideways
   // (movement + spin) and 2.5 up/down (spin only – the table soaks up any up/down push)
   const maxH = Math.abs(slipH) / (3.5 * inv), maxV = Math.abs(slipV) / (2.5 * inv);
@@ -1059,7 +1063,7 @@ const anyMoving = () => balls.some(b => !b.potted && Math.hypot(b.vx, b.vz) + Ma
 function shoot() {
   // Everything the shot depends on. Online, this is sent to the other player so their table plays it too.
   // ps = the admin panel's max power setting; it's sent with the shot so your friend's table plays it the same
-  const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y, ps: admin.powerScale };
+  const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y, ps: admin.powerScale, brk: game.isBreak ? 1 : 0 };
   netSendShot(p);
   strike(p);
   frozen = true; startChase();
@@ -1084,7 +1088,9 @@ function strike(p) {
 
 // Set the white moving for shot p (also used by the admin panel's shot finder to try shots out)
 function launchCue(p) {
-  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (p.ps > 0 ? Math.min(2, p.ps) : 1);   // curve gives finer control on soft shots
+  const brk = p.brk !== undefined ? p.brk : game.isBreak;   // a break? (sent with the shot so both tables agree)
+  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (p.ps > 0 ? Math.min(2, p.ps) : 1)   // curve gives finer control on soft shots
+    * (brk ? BREAK_BOOST : 1);
   // Where the tip hits the white, as a fraction of its radius (sx = right of centre, sy = above centre)
   const tipX = p.sx * MAX_TIP, tipY = p.sy * MAX_TIP;
   // Side spin squirts the white slightly the opposite way to the side you hit
