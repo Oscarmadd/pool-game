@@ -63,6 +63,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .pl .fr{color:var(--brass);font-size:17px}
 .power{display:flex;align-items:center;gap:10px}
 .power b{font:600 15px "Barlow Condensed",sans-serif;color:var(--dim)}
+#powerPct{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
 .meter{width:clamp(110px,22vw,220px);height:12px;background:#0c0a09;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#6fae7c,var(--brass),#d2232a)}
 #report{font-size:15px;color:var(--dim)}
@@ -182,7 +183,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><button id="nextBtn">Next frame</button></div></div>
 </div>
 <footer>
-  <div class="power"><b>Power</b><div class="meter"><i id="powerFill"></i></div></div>
+  <div class="power"><b>Power</b><div class="meter"><i id="powerFill"></i></div><b id="powerPct">0%</b></div>
   <div id="report" class="grow" aria-live="polite">Break when ready.</div>
   <div id="players" aria-label="Players"></div>
 </footer>
@@ -1483,7 +1484,11 @@ soundBtn.addEventListener('click', () => {
   try { localStorage.setItem('pool-sound', sound.on ? 'on' : 'off'); } catch (e) {}
 });
 
-function updatePower() { document.getElementById('powerFill').style.width = (power * 100) + '%'; }
+// The number is the real strength: meter fill times the admin panel's max power (so a full meter at 150% max reads 150%)
+function updatePower() {
+  document.getElementById('powerFill').style.width = (power * 100) + '%';
+  document.getElementById('powerPct').textContent = Math.round(power * admin.powerScale * 100) + '%';
+}
 
 document.getElementById('rackBtn').addEventListener('click', () => { newFrame(game.breaker); netHostReset(); });
 
@@ -2496,7 +2501,7 @@ admEl('admTake').addEventListener('click', () => {
   const f = finder.found;
   if (!f || !admCanEdit() || !myTurn() || game.over || ballState().join('|') !== f.key) return;
   aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy); power = f.p.power;
-  admin.powerScale = f.p.ps; admEl('admPower').value = Math.round(f.p.ps * 100); admEl('admPowerVal').textContent = Math.round(f.p.ps * 100) + '%';
+  admin.powerScale = f.p.ps; admEl('admPower').value = Math.round(f.p.ps * 100); admEl('admPowerVal').textContent = Math.round(f.p.ps * 100) + '%'; updatePower();
   finder.found = null;
   shoot();
   adminRefresh();
@@ -2504,7 +2509,7 @@ admEl('admTake').addEventListener('click', () => {
 
 // ---- Physics ----
 admEl('admTime').addEventListener('change', e => { admin.timeScale = +e.target.value; });
-admEl('admPower').addEventListener('input', e => { admin.powerScale = e.target.value / 100; admEl('admPowerVal').textContent = e.target.value + '%'; });
+admEl('admPower').addEventListener('input', e => { admin.powerScale = e.target.value / 100; admEl('admPowerVal').textContent = e.target.value + '%'; updatePower(); });
 
 // ---- Keep the panel's controls showing the real state ----
 function adminRefresh() {
