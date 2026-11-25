@@ -88,6 +88,26 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #onlineBtn[aria-pressed=true]::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#6fae7c;margin-right:7px;vertical-align:middle}
 #onlineBtn.lost::before{background:#ef8a6d}
 .pl .you{color:var(--brass);font:500 12px Barlow,sans-serif}
+/* Admin panel (hidden: type the Konami code during a game) */
+#admin{position:absolute;left:12px;top:12px;bottom:12px;width:300px;max-width:calc(100% - 24px);overflow:auto;touch-action:auto;z-index:4;
+  background:rgba(27,24,21,.96);border:1px solid #3d352d;border-radius:12px;padding:14px 16px;box-shadow:0 16px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px;font-size:14px}
+#admin[hidden],#admin [hidden]{display:none}
+#admin h2{font:700 22px/1 "Barlow Condensed",sans-serif;margin:0;display:flex;align-items:center;gap:8px}
+#admin h2 small{font:500 12px Barlow,sans-serif;color:var(--dim)}
+#admin h3{font:600 13px "Barlow Condensed",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);margin:0 0 6px}
+#admin .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#admin button,#admin select{min-height:34px;font-size:15px;padding:0 10px}
+#admin label{display:flex;align-items:center;gap:6px;color:var(--ink)}
+#admin .lbl{color:var(--dim);min-width:74px}
+#admin input[type=range]{flex:1;accent-color:var(--brass)}
+#admin input[type=checkbox]{accent-color:var(--brass);width:16px;height:16px}
+#admBalls{display:grid;grid-template-columns:repeat(8,1fr);gap:5px}
+#admBalls button{min-height:0;aspect-ratio:1;padding:0;border-radius:50%;font:700 12px Barlow,sans-serif;border:2px solid transparent;color:#111}
+#admBalls button.off{opacity:.28;border-style:dashed;border-color:#8a8076}
+#admMove[aria-pressed=true]{background:#3a3024}
+#admRead{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);background:#0f0d0b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;margin:0}
+#admin .note{font-size:12px;color:var(--dim);margin:0}
+#admin [disabled]{opacity:.45;cursor:default}
 @media(max-width:1100px){h1 span{display:none}}
 @media(max-width:940px){.sel span{display:none}}
 @media(max-width:600px){h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
@@ -131,6 +151,34 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button id="netClose">Cancel</button>
     <p class="small" id="netNote">Uses the free PeerJS service to find each other, then the game runs directly between your two browsers. Nothing is stored anywhere.</p>
   </div></div>
+  <div id="admin" hidden role="dialog" aria-labelledby="admTitle">
+    <h2><span id="admTitle">Admin</span> <small>local games only</small><span class="grow"></span><button id="admClose" aria-label="Close admin panel">Close</button></h2>
+    <section><h3>Turn</h3>
+      <div class="row"><span class="lbl">To play</span><button id="admTurn0">Player 1</button><button id="admTurn1">Player 2</button></div>
+      <div class="row" id="admGroupRow" style="margin-top:6px"><span class="lbl">Groups</span><select id="admGroups"></select></div>
+      <div class="row" style="margin-top:6px"><label><input type="checkbox" id="admBreak"> Break shot</label><label><input type="checkbox" id="admFree"> Free shot</label></div>
+      <div class="row" style="margin-top:6px"><span class="lbl">Ball in hand</span><select id="admHand"></select></div>
+    </section>
+    <section><h3>Balls</h3>
+      <p class="note" style="margin-bottom:6px">Tap a ball to pot it or put it back on the table.</p>
+      <div id="admBalls"></div>
+      <div class="row" style="margin-top:8px"><button id="admMove" aria-pressed="false">Move balls</button><button id="admClear">Clear to the black</button></div>
+      <div class="row" style="margin-top:6px"><button id="admUndo">Undo last shot</button><button id="admRack">Re-rack</button></div>
+    </section>
+    <section><h3>Perfect shot</h3>
+      <p class="note" style="margin-bottom:6px">Tries shots out in the background until one pots the ball, then lines you up on it.</p>
+      <div class="row"><span class="lbl">Pot</span><select id="admTarget"></select></div>
+      <div class="row" style="margin-top:6px"><span class="lbl">Cushions</span><select id="admCush"><option value="0">None needed</option><option value="1">White off 1+ cushion first</option><option value="2">White off 2+ cushions first</option><option value="3">White off 3+ cushions first</option><option value="4">White off 4+ cushions first</option></select></div>
+      <div class="row" style="margin-top:6px"><label><input type="checkbox" id="admSpin" checked> Use spin and swerve</label></div>
+      <div class="row" style="margin-top:8px"><button id="admFind">Find shot</button><button id="admTake" disabled>Take the shot</button></div>
+      <p class="note" id="admFindMsg" style="margin-top:6px"></p>
+    </section>
+    <section><h3>Physics</h3>
+      <div class="row"><span class="lbl">Speed</span><select id="admTime"><option value="1">Normal</option><option value="0.5">Half speed</option><option value="0.25">Quarter speed</option><option value="0.1">Tenth speed</option></select></div>
+      <div class="row" style="margin-top:6px"><span class="lbl">Max power</span><input type="range" id="admPower" min="25" max="200" step="5" value="100" aria-label="Max power"><b id="admPowerVal">100%</b></div>
+    </section>
+    <section><h3>Readout</h3><pre id="admRead"></pre></section>
+  </div>
   <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><button id="nextBtn">Next frame</button></div></div>
 </div>
 <footer>
@@ -879,7 +927,7 @@ function step(h) {
       const into = b.vx * nx + b.vz * nz;          // speed heading into the cushion
       if (into < 0) {
         bounceOffCushion(b, nx, nz, into);
-        hitCushion(into);
+        hitCushion(into, b);
         sfxThud(-into, b.x, b.z);
       }
     }
@@ -966,9 +1014,10 @@ function bounceOffCushion(b, nx, nz, into) {
   b.ux = -wz * R; b.uz = wx * R; b.side = wy * R;
 }
 
-function hitCushion(into) {
+function hitCushion(into, b) {
   if (!shot || into > -0.02) return;
   shot.cushions++;
+  if (b === cue && shot.firstHit === null) shot.cueFirst = (shot.cueFirst || 0) + 1;   // white off cushions before it hits a ball
   if (shot.firstHit !== null) shot.cushionAfterHit = true;   // legal-shot rule: a cushion must be hit AFTER first contact
 }
 
@@ -995,6 +1044,7 @@ const anyMoving = () => balls.some(b => !b.potted && Math.hypot(b.vx, b.vz) + Ma
 function shoot() {
   // Everything the shot depends on. Online, this is sent to the other player so their table plays it too.
   const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y };
+  adminSnapshot();   // admin panel: lets you undo this shot (local games only)
   netSendShot(p);
   strike(p);
   frozen = true; startChase();
@@ -1005,8 +1055,20 @@ function shoot() {
 
 // Hit the white: p = aim direction (ax, az), power 0..1, and where the tip hits (sx, sy, -1..1)
 function strike(p) {
-  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED;   // curve gives finer control on soft shots
   sfxStrike(p.power, cue.x, cue.z);
+  launchCue(p);
+  // Everything the rules need to know about this shot gets recorded in here as it plays out
+  seedAim(p);   // decides where the cue points for the next shot
+  shot = { number: ++shotCount, power: Math.round(p.power * 100), firstHit: null, potted: [], cushions: 0,
+           cushionAfterHit: false, cuePotted: false, isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set() };
+  state = 'moving'; power = 0; updatePower();
+  physTime = 0;
+  game.ballInHand = null;
+}
+
+// Set the white moving for shot p (also used by the admin panel's shot finder to try shots out)
+function launchCue(p) {
+  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (net.on ? 1 : admin.powerScale);   // curve gives finer control on soft shots
   // Where the tip hits the white, as a fraction of its radius (sx = right of centre, sy = above centre)
   const tipX = p.sx * MAX_TIP, tipY = p.sy * MAX_TIP;
   // Side spin squirts the white slightly the opposite way to the side you hit
@@ -1025,13 +1087,6 @@ function strike(p) {
   // way of the side (right side: squirts left, then drifts right) until the ball settles into a roll.
   const sw = cue.side * Math.tan(CUE_ELEVATION);
   cue.ux += -dz * sw; cue.uz += dx * sw;
-  // Everything the rules need to know about this shot gets recorded in here as it plays out
-  seedAim(p);   // decides where the cue points for the next shot
-  shot = { number: ++shotCount, power: Math.round(p.power * 100), firstHit: null, potted: [], cushions: 0,
-           cushionAfterHit: false, cuePotted: false, isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set() };
-  state = 'moving'; power = 0; updatePower();
-  physTime = 0;
-  game.ballInHand = null;
 }
 
 function finishShot() {
@@ -1275,7 +1330,7 @@ function placeCue(p) {
 
 addEventListener('keydown', () => audioInit(), true);
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('select, input, #netCard')) return;
+  if (e.target.closest && e.target.closest('select, input, #netCard, #admin')) return;
   if (state !== 'aim' || game.over || !myTurn()) return;
   // T (or the Overview button) toggles the "just looking" top view; Esc also leaves it
   if (e.key === 't' || e.key === 'T' || (looking && e.key === 'Escape')) { setLook(!looking); return; }
@@ -1325,7 +1380,7 @@ function audioInit() {
     src.start();
   } catch (e) { sound.ctx = null; }
 }
-const audioReady = () => sound.ctx && sound.ctx.state === 'running' && sound.on;
+const audioReady = () => sound.ctx && sound.ctx.state === 'running' && sound.on && !admin.sim;   // silent while the admin shot finder tries shots
 
 // Where a sound is relative to the listener (the camera): pan -1 (left) .. 1 (right), and a distance fade
 const camSpace = new THREE.Vector3();
@@ -1663,7 +1718,7 @@ function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
   if (state === 'moving' && !(net.watch && net.watch.done)) {
-    physTime += dt;
+    physTime += dt * (net.on ? 1 : admin.timeScale);   // admin panel slow motion (local only)
     let stopped = false;
     for (let i = 0; physTime >= PHYS_H && i < 40; i++) {
       physTime -= PHYS_H;
@@ -2119,6 +2174,381 @@ document.getElementById('nextBtn').addEventListener('click', () => {
   if (net.on && !net.host) { netSend({ t: 'next' }); return; }
   newFrame(1 - game.breaker); netHostReset();
 });
+
+// ================================================================
+// 10. ADMIN PANEL (testing tools) – type the Konami code during a game to open it:
+//     ↑ ↑ ↓ ↓ ← → ← → B A Enter. Type it again (or Esc) to close.
+// It only works in local games: online, changes on one table would make the two tables disagree, and it
+// would let one player cheat. Slow motion and max power go back to normal whenever you're online.
+// ================================================================
+const admin = { sim: false, open: false, timeScale: 1, powerScale: 1, moving: false, drag: null, snap: null, pos: 0, fps: 0 };
+const admEl = id => document.getElementById(id);
+const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a', 'Enter'];
+
+// Listens before the game's own keys. Once ↑ ↑ ↓ ↓ has been typed, the rest of the code (← → ← → B A Enter)
+// is kept from the game, so it doesn't nudge the aim, change the spin or press a focused button.
+addEventListener('keydown', e => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest('input, select, textarea')) return;
+  if (admin.open && e.key === 'Escape') { adminOpen(false); e.stopImmediatePropagation(); return; }
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === KONAMI[admin.pos]) admin.pos++;
+  else admin.pos = k === 'ArrowUp' ? (admin.pos === 2 ? 2 : 1) : 0;
+  if (admin.pos > 4) { e.preventDefault(); e.stopImmediatePropagation(); }
+  if (admin.pos === KONAMI.length) { admin.pos = 0; adminOpen(!admin.open); }
+}, true);
+
+function adminOpen(on) {
+  if (on && net.on) { setReport('<strong>The admin panel only works in local games.</strong>'); return; }
+  admin.open = on;
+  admEl('admin').hidden = !on;
+  if (!on) { adminMoveMode(false); if (finder.run) finderStop(''); }
+  adminRefresh();
+}
+admEl('admClose').addEventListener('click', () => adminOpen(false));
+
+// Anything that changes the rules state can only happen between shots
+const admCanEdit = () => admin.open && !net.on && state === 'aim';
+function adminChanged() { updateUI(); adminRefresh(); }
+
+// ---- Turn, groups, free shot, ball in hand ----
+for (const i of [0, 1]) admEl('admTurn' + i).addEventListener('click', () => {
+  if (!admCanEdit()) return;
+  game.turn = i; adminChanged();
+});
+admEl('admGroups').addEventListener('change', e => {
+  if (!admCanEdit()) return;
+  const v = e.target.value;
+  game.players[0].group = v === 'open' ? null : v;
+  game.players[1].group = v === 'open' ? null : v === 'A' ? 'B' : 'A';
+  adminChanged();
+});
+admEl('admBreak').addEventListener('change', e => { if (admCanEdit()) { game.isBreak = e.target.checked; adminChanged(); } });
+admEl('admFree').addEventListener('change', e => { if (admCanEdit()) { game.freeShot = e.target.checked; adminChanged(); } });
+admEl('admHand').addEventListener('change', e => {
+  if (!admCanEdit()) return;
+  game.ballInHand = e.target.value || null;
+  if (cue.potted || (game.ballInHand === 'baulk' && cue.x > baulkX())) respawnCue();
+  if (game.ballInHand && view === 'cue') { looking = false; setView('top'); }
+  adminChanged();
+});
+
+// ---- Balls: pot / put back, drag anywhere, clear to the black ----
+function adminPot(b) {
+  falling = falling.filter(f => f.b !== b);
+  b.potted = true; b.vx = b.vz = b.ux = b.uz = b.side = 0; b.mesh.visible = false;
+}
+function adminRespot(b) {
+  if (b === cue) { respawnCue(); return; }
+  // Back on the black spot, or the nearest free place up the table from it
+  // (straight up the middle towards the top cushion first, then back down, then off to the sides)
+  let x = L / 4, z = 0;
+  const clash = () => balls.some(q => q !== b && !q.potted && Math.hypot(q.x - x, q.z - z) < (q.r + b.r) * 1.05);
+  const spots = [];
+  for (let side = 0; side < 6; side++)
+    for (let k = 0; k < 40; k++) spots.push([L / 4 + (k % 2 ? -1 : 1) * Math.ceil(k / 2) * b.r * 2.1, (side % 2 ? -1 : 1) * Math.ceil(side / 2) * b.r * 2.1]);
+  for (const [sx, sz] of spots) {
+    if (Math.abs(sx) > HX - b.r || Math.abs(sz) > HZ - b.r) continue;
+    x = sx; z = sz;
+    if (!clash()) break;
+  }
+  falling = falling.filter(f => f.b !== b);
+  Object.assign(b, { x, z, vx: 0, vz: 0, ux: 0, uz: 0, side: 0, potted: false });
+  b.mesh.visible = true; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1);
+  b.mesh.position.set(x, b.r, z);
+}
+function adminBuildBalls() {
+  admEl('admBalls').innerHTML = balls.slice().sort((a, b) => a.n - b.n).map(b => {
+    const bg = b.n === 0 ? '#f1ece2' : colourOf(b.n), ink = b.n === 8 || (RULE.ballSet !== 'ry' && [2, 4, 6, 7].includes(b.n % 8)) ? '#fff' : '#111';
+    return `<button data-n="${b.n}" style="background:${bg};color:${ink}" title="${b.n === 0 ? 'White' : 'Ball ' + b.n}">${b.n === 0 ? '' : b.n}</button>`;
+  }).join('');
+}
+admEl('admBalls').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-n]');
+  if (!btn || !admCanEdit()) return;
+  const b = balls.find(q => q.n === +btn.dataset.n);
+  if (!b) return;
+  if (b.potted) adminRespot(b); else adminPot(b);
+  adminChanged();
+});
+admEl('admClear').addEventListener('click', () => {
+  if (!admCanEdit()) return;
+  for (const b of balls) if (b.n !== 0 && b.n !== 8 && !b.potted) adminPot(b);
+  for (const b of balls) if ((b.n === 0 || b.n === 8) && b.potted) adminRespot(b);
+  game.isBreak = false;
+  adminChanged();
+});
+admEl('admRack').addEventListener('click', () => { if (admin.open && !net.on) { newFrame(game.breaker); adminBuildBalls(); adminRefresh(); } });
+
+// Move balls: drag any ball around in the top view. While it's on, presses on the table only move balls.
+function adminMoveMode(on) {
+  admin.moving = on; admin.drag = null; el.style.cursor = '';
+  admEl('admMove').setAttribute('aria-pressed', on);
+  if (on && view === 'cue' && state === 'aim') { looking = false; gesture = null; power = 0; updatePower(); setView('top'); }
+}
+admEl('admMove').addEventListener('click', () => { if (admCanEdit() || admin.moving) adminMoveMode(!admin.moving); });
+function adminBallAt(p) {
+  let best = null, bd = Infinity;
+  for (const b of balls) { if (b.potted) continue; const d = Math.hypot(p.x - b.x, p.z - b.z); if (d < b.r * 2 && d < bd) { best = b; bd = d; } }
+  return best;
+}
+el.addEventListener('pointerdown', e => {
+  if (!admin.moving || net.on) return;
+  e.stopImmediatePropagation();
+  if (state !== 'aim' || view !== 'top' || camBlend > 0) return;
+  const p = tablePoint(e), b = p && adminBallAt(p);
+  if (!b) return;
+  admin.drag = { b, dx: b.x - p.x, dz: b.z - p.z };
+  el.setPointerCapture(e.pointerId); el.style.cursor = 'grabbing';
+}, true);
+el.addEventListener('pointermove', e => {
+  if (!admin.moving || net.on) return;
+  e.stopImmediatePropagation();
+  const p = tablePoint(e); if (!p) return;
+  if (!admin.drag) { el.style.cursor = view === 'top' && adminBallAt(p) ? 'grab' : ''; return; }
+  const b = admin.drag.b;
+  const x = Math.max(-HX + b.r, Math.min(HX - b.r, p.x + admin.drag.dx));
+  const z = Math.max(-HZ + b.r, Math.min(HZ - b.r, p.z + admin.drag.dz));
+  if (balls.some(q => q !== b && !q.potted && Math.hypot(q.x - x, q.z - z) < q.r + b.r)) return;   // don't overlap
+  b.x = x; b.z = z; b.mesh.position.set(x, b.r, z);
+}, true);
+const adminDrop = e => { if (admin.moving && !net.on) { e.stopImmediatePropagation(); if (admin.drag) { admin.drag = null; el.style.cursor = 'grab'; adminRefresh(); } } };
+el.addEventListener('pointerup', adminDrop, true);
+el.addEventListener('pointercancel', adminDrop, true);
+
+// ---- Undo: put everything back how it was just before the last shot ----
+function adminSnapshot() {
+  if (net.on) { admin.snap = null; return; }
+  const r = admEl('report');
+  admin.snap = { balls: ballState(), shotCount, aim: { ...aim },
+    game: { ...game, players: game.players.map(p => ({ ...p })) }, report: r.innerHTML, foul: r.classList.contains('foul') };
+}
+admEl('admUndo').addEventListener('click', () => {
+  const s = admin.snap;
+  if (!s || !admin.open || net.on) return;
+  state = 'aim'; physTime = 0; chasing = false; frozen = false; looking = false; glideT = 1; gesture = null;
+  falling = [];
+  applyBalls(s.balls);
+  for (const b of balls) { b.mesh.visible = !b.potted; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
+  shotCount = s.shotCount; aim = { ...s.aim };
+  Object.assign(game, s.game, { players: s.game.players.map(p => ({ ...p })) });
+  admEl('over').hidden = !game.over;
+  setReport(s.report, s.foul);
+  pendingView = null; view = game.ballInHand && game.ballInHand !== 'baulk-optional' ? 'top' : 'cue';
+  if (admin.moving) view = 'top';
+  admin.snap = null;
+  adminChanged();
+});
+
+// ---- Perfect shot finder ----
+// Physics runs in fixed steps, so a shot played from the same table always plays out the same way. That means
+// we can try a shot on the real table in a split second (silently, nothing drawn), see what happened, put every
+// ball back, and try another. It scores each try, keeps the most promising ones and fine-tunes them until one
+// pots the chosen ball (first contact on that ball, white stays up, and the white has hit enough cushions first).
+const finder = { run: null, found: null };
+function simulate(p, target, needCush) {
+  const saved = balls.map(b => [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted]);
+  const savedShot = shot, savedFalling = falling;
+  admin.sim = true; falling = [];
+  shot = { number: 0, power: 0, firstHit: null, potted: [], cushions: 0, cushionAfterHit: false, cuePotted: false,
+           isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set(), cueFirst: 0 };
+  let near = Infinity, pocketNear = Infinity, hit = false;
+  try {
+    launchCue(p);
+    for (let i = 0; i < 12 / PHYS_H; i++) {
+      step(PHYS_H);
+      if (shot.firstHit === null) {   // white still on its way: how close does it get to the target, once it's done its cushions?
+        if ((shot.cueFirst || 0) >= needCush && !target.potted) near = Math.min(near, Math.hypot(cue.x - target.x, cue.z - target.z) - cue.r - target.r);
+      } else if (shot.firstHit === target.n && (shot.cueFirst || 0) >= needCush) {
+        hit = true;
+        if (target.potted) break;
+        if (i % 4 === 0) for (const q of POCKETS) pocketNear = Math.min(pocketNear, Math.hypot(target.x - q.x, target.z - q.z) - q.capture);
+      } else if (i > 0 && shot.firstHit !== null) break;   // hit the wrong ball first (or too few cushions): no good
+      if (i % 10 === 0 && !anyMoving()) break;
+    }
+    // The shot has to finish cleanly too: keep running a little so we know whether the white goes in-off
+    for (let i = 0; i < 12 / PHYS_H && hit && target.potted && anyMoving(); i++) step(PHYS_H);
+    return { potted: target.potted, hit, near: Math.max(0, near), pocketNear: Math.max(0, pocketNear), cueIn: shot.cuePotted, cush: shot.cueFirst || 0 };
+  } finally {   // put every ball back exactly where it was
+    balls.forEach((b, i) => { [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted] = saved[i]; });
+    shot = savedShot; falling = savedFalling; admin.sim = false;
+  }
+}
+// Higher is better: a clean pot scores 3, potting but losing the white 2, hitting it right 1 to 2, a miss below 0
+const shotScore = r => r.potted ? (r.cueIn ? 2 : 3) : r.hit ? 2 - Math.min(1, r.pocketNear / 0.4) : -Math.min(1, r.near) - 1;
+
+function* findShot(target, needCush, useSpin) {
+  const rnd = () => Math.random();
+  const mk = (ang, pw, sx, sy) => ({ ax: Math.cos(ang), az: Math.sin(ang), power: Math.min(1, Math.max(0.05, pw)), sx: useSpin ? sx : 0, sy: useSpin ? sy : 0 });
+  const tries = [];
+  // Straight-in ideas first: aim at the "ghost ball" spot that sends the target at each pocket
+  if (needCush === 0) for (const q of POCKETS) {
+    const ux = q.x - target.x, uz = q.z - target.z, d = Math.hypot(ux, uz);
+    const gx = target.x - ux / d * (target.r + cue.r), gz = target.z - uz / d * (target.r + cue.r);
+    const ang = Math.atan2(gz - cue.z, gx - cue.x);
+    for (const pw of [0.3, 0.45, 0.65]) tries.push(mk(ang, pw, 0, 0));
+  }
+  // Then shots all round the clock (that's where the cushion and swerve shots come from)
+  const wide = needCush ? 700 : 260;
+  for (let i = 0; i < wide; i++) tries.push(mk(rnd() * Math.PI * 2, 0.35 + rnd() * 0.65, rnd() * 2 - 1, rnd() * 2 - 1));
+  const scored = [];
+  let n = 0;
+  for (const p of tries) {
+    const r = simulate(p, target, needCush); n++;
+    scored.push({ p, r, s: shotScore(r) });
+    if (r.potted && !r.cueIn) return { p, r, n };
+    yield n;
+  }
+  // Fine-tune the best few: nudge the angle, power and spin, keep whatever does better, and nudge less over time
+  scored.sort((a, b) => b.s - a.s);
+  for (const seed of scored.slice(0, 10)) {
+    let best = seed, size = 1;
+    for (let k = 0; k < 70; k++) {
+      const b = best.p, a = Math.atan2(b.az, b.ax) + (rnd() - 0.5) * 0.03 * size;
+      const p = mk(a, b.power + (rnd() - 0.5) * 0.25 * size, Math.max(-1, Math.min(1, b.sx + (rnd() - 0.5) * 0.6 * size)), Math.max(-1, Math.min(1, b.sy + (rnd() - 0.5) * 0.6 * size)));
+      const r = simulate(p, target, needCush); n++;
+      const sc = shotScore(r);
+      if (r.potted && !r.cueIn) return { p, r, n };
+      if (sc > best.s) best = { p, r, s: sc }; else size = Math.max(0.05, size * 0.93);
+      yield n;
+    }
+  }
+  return null;
+}
+function finderStop(msg) {
+  finder.run = null;
+  admEl('admFind').textContent = 'Find shot';
+  if (msg != null) admEl('admFindMsg').textContent = msg;
+  adminRefresh();
+}
+admEl('admFind').addEventListener('click', () => {
+  if (finder.run) { finderStop('Stopped.'); return; }
+  if (!admCanEdit() || game.over || cue.potted) return;
+  const target = balls.find(b => b.n === +admEl('admTarget').value && !b.potted);
+  if (!target) return;
+  const need = +admEl('admCush').value;
+  finder.found = null;
+  finder.run = findShot(target, need, admEl('admSpin').checked);
+  finder.key = ballState().join('|');   // if the table changes while it's searching, the answer would be wrong
+  admEl('admFind').textContent = 'Stop';
+  const t0 = performance.now();
+  const work = () => {
+    if (!finder.run) return;
+    if (state !== 'aim' || ballState().join('|') !== finder.key) { finderStop('The table changed, so I stopped looking.'); return; }
+    const until = performance.now() + 24;   // a slice of each frame, so the game keeps running smoothly
+    let res;
+    while (performance.now() < until) { res = finder.run.next(); if (res.done) break; }
+    if (!res.done) { admEl('admFindMsg').textContent = `Trying shots… ${res.value} so far`; requestAnimationFrame(work); return; }
+    const out = res.value, secs = ((performance.now() - t0) / 1000).toFixed(1);
+    if (!out) { finderStop(`Couldn't find one in ${secs}s. Try fewer cushions, turning spin on, or more max power.`); return; }
+    finder.found = { p: out.p, key: finder.key };
+    finderStop(`Found one after ${out.n} tries (${secs}s): ${Math.round(out.p.power * 100)}% power` +
+      (out.p.sx || out.p.sy ? `, spin ${out.p.sx >= 0 ? 'right' : 'left'} ${Math.abs(out.p.sx * 100).toFixed(0)}% / ${out.p.sy >= 0 ? 'top' : 'back'} ${Math.abs(out.p.sy * 100).toFixed(0)}%` : ', centre ball') +
+      (out.r.cush ? `, ${out.r.cush} cushion${out.r.cush > 1 ? 's' : ''} first` : '') + '. You’re lined up on it.');
+    adminLineUp();
+  };
+  requestAnimationFrame(work);
+});
+// Put the cue on the found shot: aim, spin and power, and get down behind it
+function adminLineUp() {
+  const f = finder.found; if (!f) return;
+  if (admin.moving) adminMoveMode(false);
+  aim = { x: f.p.ax, z: f.p.az };
+  setSpin(f.p.sx, f.p.sy);
+  power = f.p.power; updatePower();
+  looking = false; gesture = null; pendingView = null; frozen = false;
+  setView('cue');
+}
+admEl('admTake').addEventListener('click', () => {
+  const f = finder.found;
+  if (!f || !admCanEdit() || game.over || ballState().join('|') !== f.key) return;
+  aim = { x: f.p.ax, z: f.p.az }; setSpin(f.p.sx, f.p.sy); power = f.p.power;
+  finder.found = null;
+  shoot();
+  adminRefresh();
+});
+
+// ---- Physics ----
+admEl('admTime').addEventListener('change', e => { admin.timeScale = +e.target.value; });
+admEl('admPower').addEventListener('input', e => { admin.powerScale = e.target.value / 100; admEl('admPowerVal').textContent = e.target.value + '%'; });
+
+// ---- Keep the panel's controls showing the real state ----
+function adminRefresh() {
+  if (!admin.open) return;
+  const edit = admCanEdit();
+  for (const i of [0, 1]) {
+    const b = admEl('admTurn' + i);
+    b.textContent = game.players[i].name; b.setAttribute('aria-pressed', game.turn === i); b.disabled = !edit;
+  }
+  const gs = admEl('admGroups'), gn = RULE.groupNames;
+  admEl('admGroupRow').hidden = !gn;
+  if (gn) {
+    const opts = [['open', 'Table open'], ['A', `${game.players[0].name} ${gn.A}`], ['B', `${game.players[0].name} ${gn.B}`]];
+    if (gs.options.length !== 3 || gs.options[1].text !== opts[1][1]) gs.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+    gs.value = game.players[0].group || 'open'; gs.disabled = !edit;
+  }
+  admEl('admBreak').checked = game.isBreak; admEl('admBreak').disabled = !edit;
+  admEl('admFree').checked = game.freeShot; admEl('admFree').disabled = !edit;
+  const hs = admEl('admHand');
+  const hands = RULE.baulk ? [['', 'None'], ['baulk', 'Behind baulk line'], ['baulk-optional', 'Optional (baulk)'], ['anywhere', 'Anywhere']] : [['', 'None'], ['anywhere', 'Anywhere']];
+  if (hs.options.length !== hands.length) hs.innerHTML = hands.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  hs.value = game.ballInHand || ''; hs.disabled = !edit;
+  if (admEl('admBalls').children.length !== balls.length || admEl('admBalls').dataset.set !== RULE.ballSet) { adminBuildBalls(); admEl('admBalls').dataset.set = RULE.ballSet; }
+  for (const btn of admEl('admBalls').children) {
+    const b = balls.find(q => q.n === +btn.dataset.n);
+    if (!b) continue;
+    btn.classList.toggle('off', b.potted); btn.disabled = !edit;
+    btn.setAttribute('aria-label', (b.n === 0 ? 'White' : 'Ball ' + b.n) + (b.potted ? ', potted' : ', on the table'));
+  }
+  for (const id of ['admMove', 'admClear', 'admRack']) admEl(id).disabled = !edit && !(id === 'admMove' && admin.moving);
+  admEl('admUndo').disabled = !admin.snap;
+  // Shot finder: the balls you could pot (the ones that are on come first), and whether the found shot still fits
+  const ts = admEl('admTarget'), onTable = balls.filter(b => b.n !== 0 && !b.potted).sort((a, b) => a.n - b.n);
+  const isOn = n => RULE.isOn ? RULE.isOn(n, game) : true;
+  const list = [...onTable.filter(b => isOn(b.n)), ...onTable.filter(b => !isOn(b.n))];
+  const key = list.map(b => b.n).join(',');
+  if (ts.dataset.key !== key) {
+    const keep = ts.value;
+    const nm = n => n === 8 ? 'The black (8)' : RULE.ballSet === 'ry' ? (n < 8 ? 'Red ' : 'Yellow ') + n : 'Ball ' + n;
+    ts.innerHTML = list.map(b => `<option value="${b.n}">${nm(b.n)}${isOn(b.n) ? '' : ' (not on)'}</option>`).join('');
+    ts.dataset.key = key;
+    if (list.some(b => String(b.n) === keep)) ts.value = keep;
+  }
+  const busy = !!finder.run;
+  ts.disabled = admEl('admCush').disabled = admEl('admSpin').disabled = busy || !edit;
+  admEl('admFind').disabled = !busy && (!edit || game.over || cue.potted || !list.length);
+  admEl('admTake').disabled = busy || !finder.found || !edit || game.over || ballState().join('|') !== finder.found.key;
+}
+
+// Readout, ~6 times a second while the panel is open. Also closes the panel if you go online.
+let admFrames = 0, admLast = performance.now();
+function adminTick(now) {
+  admFrames++;
+  if (now - admLast > 160) {
+    admin.fps = admFrames * 1000 / (now - admLast); admFrames = 0; admLast = now;
+    if (admin.open && net.on) adminOpen(false);
+    if (admin.open) {
+      const live = balls.filter(b => !b.potted);
+      const fast = live.reduce((m, b) => Math.max(m, Math.hypot(b.vx, b.vz)), 0);
+      const cs = Math.hypot(cue.vx, cue.vz), f = n => n.toFixed(3);
+      const s = shot;
+      admEl('admRead').textContent =
+        `state      ${state}${state === 'moving' ? ' (' + live.filter(b => Math.hypot(b.vx, b.vz) > 0.006).length + ' moving)' : ''}\n` +
+        `view       ${looking ? 'overview' : view}\n` +
+        `white      x ${f(cue.x)}  z ${f(cue.z)} m\n` +
+        `white      ${cs.toFixed(2)} m/s · spin ${Math.hypot(cue.ux, cue.uz).toFixed(2)} · side ${cue.side.toFixed(2)}\n` +
+        `fastest    ${fast.toFixed(2)} m/s\n` +
+        `aim        ${(Math.atan2(aim.z, aim.x) * 180 / Math.PI).toFixed(2)}°\n` +
+        `max speed  ${(0.25 + MAX_SPEED * admin.powerScale).toFixed(2)} m/s\n` +
+        `on table   ${live.length - (cue.potted ? 0 : 1)} balls\n` +
+        (s ? `last shot  #${s.number} · ${s.power}% · first ${s.firstHit ?? 'none'}\n           potted ${s.potted.join(',') || 'none'}${s.cuePotted ? ' + white' : ''} · ${s.cushions} cushions\n` : '') +
+        `frame rate ${admin.fps.toFixed(0)} fps`;
+      adminRefresh();
+    }
+  }
+  requestAnimationFrame(adminTick);
+}
+requestAnimationFrame(adminTick);
 
 useTable(startKey);
 requestAnimationFrame(frame);
