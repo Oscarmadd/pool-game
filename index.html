@@ -1149,27 +1149,69 @@ const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.0066, 0.0066, 0.012, 16)
 tip.rotation.z = -Math.PI / 2;
 const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.0142, 0.0142, 0.35, 16), mat('#22140c', 0.5));
 butt.rotation.z = -Math.PI / 2;
-// The stick lives in a "tilt" group so the butt end rises a few degrees, like a real cue resting on a bridge hand
+// The stick lives in a "tilt" group so the butt end rises, like a real cue resting on a bridge hand.
+// Normally it's about 4°, but like a real player the cue is jacked up more when it has to clear the
+// rail, a cushion or another ball behind the white (see cueTiltNeeded). This is only how it looks: the
+// shot itself always plays as a ~4° cue (CUE_ELEVATION).
 const cueTilt = new THREE.Group();
-cueTilt.rotation.z = -0.07;   // about 4°: tip stays at the ball, the butt end lifts
 cueTilt.add(stick, tip, butt);
 cueGroup.add(cueTilt); scene.add(cueGroup);
+const CUE_TILT_MIN = 0.07, CUE_TILT_MAX = 0.75;   // radians: ~4° normally, up to ~43° over a frozen-to-the-rail white
+const CUE_PULL = 0.28;      // how far the cue draws back at full power
+const CUE_GAP = 0.003;      // gap between the tip and the ball when the cue is resting
+let cueTiltNow = CUE_TILT_MIN, cueTiltT = 0, cueWasShown = false;
+
+// Height of the cue's centre line where it crosses the white (the spin dial moves it up and down)
+const cuePivotY = () => cue.r + 0.004 + spin.y * MAX_TIP * cue.r;
+
+// How steeply the cue has to point down at the white so that, all the way back to the butt (fully drawn
+// back), it passes over the rail, the cushions and any balls behind the white. Worked out for the full
+// draw back, so the angle stays put while you pull the cue back and push it through.
+function cueTiltNeeded() {
+  const h0 = cuePivotY(), reach = 0.03 + CUE_PULL + CUE_LEN, CUSH_TOP = 0.036, CLEAR = 0.004;
+  let need = Math.tan(CUE_TILT_MIN);
+  for (let d = 0.01; d < reach; d += 0.008) {
+    const x = cue.x - aim.x * d, z = cue.z - aim.z * d, ax = Math.abs(x), az = Math.abs(z);
+    const rad = Math.min(0.0145, 0.0065 + 0.0075 * d / CUE_LEN);   // the cue thickens towards the butt
+    let H = 0;
+    if (ax > CA + RAIL + 0.01 || az > CB + RAIL + 0.01) H = 0;          // past the table: nothing to hit
+    else if (ax > CA - BEVEL || az > CB - BEVEL) H = RAIL_TOP;          // over the wooden rail
+    else if (ax > HX || az > HZ) H = CUSH_TOP;                          // over a cushion
+    for (const b of balls) {
+      if (b === cue || b.potted) continue;
+      const q = Math.max(0, Math.hypot(b.x - x, b.z - z) - rad);
+      if (q < b.r) H = Math.max(H, b.r + Math.sqrt(b.r * b.r - q * q));
+    }
+    if (H) need = Math.max(need, (H + CLEAR + rad - h0) / d);
+  }
+  return Math.min(CUE_TILT_MAX, Math.atan(need));
+}
 
 function updateAimVisuals() {
   const aiming = state === 'aim' && !cue.potted && !game.over;
   cueGroup.visible = aiming;
-  if (!aiming) return;
+  const now = performance.now(), dt = Math.min(0.1, (now - cueTiltT) / 1000);
+  cueTiltT = now;
+  if (!aiming) { cueWasShown = false; return; }
 
-  // Cue stick: pull back further the more power you've dialled in
-  const back = 0.012 + power * 0.28;
+  // Raise or lower the butt smoothly as the aim changes (straight to it when the cue first appears)
+  const want = cueTiltNeeded();
+  cueTiltNow = cueWasShown ? cueTiltNow + (want - cueTiltNow) * (1 - Math.exp(-dt * 8)) : want;
+  cueWasShown = true;
+  cueTilt.rotation.z = -cueTiltNow;
+
   cueGroup.position.set(cue.x, cue.r + 0.004, cue.z);
   cueGroup.rotation.y = Math.atan2(-aim.z, aim.x);
   // move the cue up/down and left/right to the spot you've chosen on the spin dial
-  cueTilt.position.set(0, spin.y * MAX_TIP * cue.r, spin.x * MAX_TIP * cue.r);
+  const py = spin.y * MAX_TIP * cue.r, pz = spin.x * MAX_TIP * cue.r;
+  cueTilt.position.set(0, py, pz);
+  // Where the cue's line meets the ball's surface, so the tip rests just off the ball whatever the angle.
+  // Then pull back further the more power you've dialled in.
+  const pd = py * Math.sin(cueTiltNow), s0 = -pd + Math.sqrt(Math.max(0, pd * pd - py * py - pz * pz + cue.r * cue.r));
+  const back = s0 + CUE_GAP + power * CUE_PULL;
   stick.position.x = -back - CUE_LEN / 2;
   tip.position.x = -back - 0.006;
   butt.position.x = -back - CUE_LEN + 0.175;
-
 }
 
 // ================================================================
@@ -1533,7 +1575,9 @@ function updateTopPose() {
 
 function updateCuePose() {
   // Low behind the cue ball, eyes just above the cue, looking along the aim line
-  const back = 0.62, height = 0.16, ahead = 0.9;
+  const back = 0.62, ahead = 0.9;
+  // and if the cue is jacked up over a rail or a ball, rise gently so we stay above it rather than inside it
+  const height = Math.max(0.16, cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05);
   cuePose.pos.set(cue.x - aim.x * back, cue.r + height, cue.z - aim.z * back);
   cuePose.look.set(cue.x + aim.x * ahead, 0, cue.z + aim.z * ahead);
   cuePose.fov = camera.aspect < 0.9 ? 64 : 50;   // a bit wider on a phone
