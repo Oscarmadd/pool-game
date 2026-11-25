@@ -310,7 +310,7 @@ function applySpec(key) {
 //
 // judge() returns { result, msg, foul?, cue? } where result is one of:
 //   'continue' – same player shoots again      'switch' – other player's turn
-//   'foul'     – other player's turn with a free shot (cue: 'baulk' = must play from baulk,
+//   'foul'     – other player's turn with a free shot and a second visit to follow (cue: 'baulk' = must play from baulk,
 //                'baulk-optional' = play from where it lies or move it into baulk)
 //   'win' / 'lose' – the shooter wins or loses the frame      'rerack' – set up again, same player breaks
 
@@ -369,7 +369,9 @@ const RULESETS = {
       // ---- The black ----
       if (black) {
         if (foul) return { result: 'lose', msg: 'Black potted on a foul (' + foul + ').' };
-        if (!open && ballsLeft(me.group) === 0) return { result: 'win', msg: me.name + ' cleared the ' + RULE.groupNames[me.group] + ' and potted the black.' };
+        // You have to be on the black before the shot: potting it with your last red/yellow still loses
+        if (onBlack) return { result: 'win', msg: me.name + ' cleared the ' + RULE.groupNames[me.group] + ' and potted the black.' };
+        if (!open && ballsLeft(me.group) === 0) return { result: 'lose', msg: 'Black potted in the same shot as your last ' + RULE.groupNames[me.group].slice(0, -1) + ' – it has to go down on its own.' };
         return { result: 'lose', msg: 'Black potted before clearing your ' + (open ? 'group' : RULE.groupNames[me.group]) + '.' };
       }
       if (foul) return { result: 'foul', foul, cue: s.cuePotted ? 'baulk' : 'baulk-optional' };
@@ -388,8 +390,8 @@ const RULESETS = {
 
       // ---- Keep going or hand over? ----
       const scored = colours.some(n => g.freeShot || open || groupOf(n) === me.group);
+      // (A miss after a foul doesn't hand over straight away: applyVerdict() turns it into the second visit.)
       if (scored) return { result: 'continue', msg: msg + 'Keep going.' };
-      if (g.freeShot) return { result: 'continue', msg: msg + 'Free shot used – now your visit.' };
       return { result: 'switch', msg: msg + 'Nothing potted.' };
     },
   },
@@ -415,6 +417,7 @@ let RULE = RULESETS.blackball;
 const game = {
   players: [{ name: 'Player 1', group: null, frames: 0 }, { name: 'Player 2', group: null, frames: 0 }],
   turn: 0, breaker: 0, isBreak: true, freeShot: false, ballInHand: null, over: false,
+  extraVisit: false,   // after a foul: the incoming player still has their second visit to come
 };
 
 // Online play (see section 9). me = which player this browser is (0 = host, 1 = guest).
@@ -427,7 +430,7 @@ const nextView = () => (net.on && game.turn !== net.me) || (game.ballInHand && g
 
 function newFrame(breaker) {
   game.breaker = breaker; game.turn = breaker;
-  game.isBreak = true; game.freeShot = false; game.over = false;
+  game.isBreak = true; game.freeShot = false; game.extraVisit = false; game.over = false;
   for (const p of game.players) p.group = null;
   game.ballInHand = RULE.baulk ? 'baulk' : 'anywhere';
   document.getElementById('over').hidden = true;
@@ -453,6 +456,7 @@ function applyVerdict(v) {
     const winner = v.result === 'win' ? me : them;
     winner.frames++;
     game.over = true;
+    game.extraVisit = false;
     document.getElementById('overTitle').textContent = winner.name + ' wins the frame';
     document.getElementById('overWhy').textContent = (v.result === 'win' ? '' : me.name + ' loses: ') + v.msg;
     document.getElementById('overScore').textContent = game.players.map(p => p.name + ' ' + p.frames).join('  ·  ');
@@ -465,9 +469,14 @@ function applyVerdict(v) {
   if (v.result === 'foul') {
     game.turn = 1 - game.turn;
     game.freeShot = true;
+    game.extraVisit = true;   // two visits: the free shot starts the first, and the second follows whatever happens on it
     game.ballInHand = v.cue === 'baulk' || v.cue === 'baulk-optional' ? v.cue : null;
     if (v.cue === 'baulk' && cue.x > baulkX()) respawnCue();
     setReport('<strong>Foul – ' + v.foul + '.</strong> ' + them.name + ' gets a free shot + 1 visit.', true);
+  } else if (v.result === 'switch' && game.extraVisit) {
+    // The first of the two visits has ended: the same player comes back for the second
+    game.extraVisit = false;
+    setReport(v.msg + ' Now your second visit.');
   } else {
     if (v.result === 'switch') game.turn = 1 - game.turn;
     setReport(v.msg);
@@ -499,6 +508,7 @@ function updateUI() {
     const grp = me.group ? (ballsLeft(me.group) ? 'on ' + RULE.groupNames[me.group] : 'on the black') : 'table open';
     t = me.name + (game.isBreak ? ' to break' : ' · ' + grp);
     if (game.freeShot) t += ' · <em>free shot + 1 visit</em>';
+    else if (game.extraVisit) t += ' · <em>+1 visit to come</em>';
   }
   document.getElementById('turnText').innerHTML = t;
   const h = document.getElementById('hint');
@@ -1925,7 +1935,7 @@ function fullState() {
   const over = game.over ? { title: netEl('overTitle').textContent, why: netEl('overWhy').textContent, score: netEl('overScore').textContent } : null;
   const rep = netEl('report');
   return { t: 'sync', seq: net.seq, rules: rulesSel.value, table: tableKey, shotCount, balls: ballState(),
-           game: { turn: game.turn, breaker: game.breaker, isBreak: game.isBreak, freeShot: game.freeShot,
+           game: { turn: game.turn, breaker: game.breaker, isBreak: game.isBreak, freeShot: game.freeShot, extraVisit: game.extraVisit,
                    ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })) },
            over, report: rep.innerHTML, foul: rep.classList.contains('foul') };
 }
@@ -1986,7 +1996,7 @@ function applySync(s) {
   applyBalls(s.balls);
   shotCount = s.shotCount;
   const g = s.game;
-  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, ballInHand: g.ballInHand, over: g.over });
+  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players = g.players.map((p, i) => ({ name: cleanName(p.name, 'Player ' + (i + 1)), group: p.group, frames: p.frames | 0 }));
   net.seq = s.seq;
   if (s.over) {
@@ -2369,7 +2379,7 @@ function applyAdmin(m) {
   for (const b of balls) { b.mesh.visible = !b.potted; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
   shotCount = m.shotCount;
   const g = m.game;
-  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, ballInHand: g.ballInHand, over: g.over });
+  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players.forEach((p, i) => { p.group = g.players[i].group; p.frames = g.players[i].frames | 0; });
   net.seq = m.seq;
   if (m.over) { netEl('overTitle').textContent = m.over.title; netEl('overWhy').textContent = m.over.why; netEl('overScore').textContent = m.over.score; }
@@ -2395,7 +2405,7 @@ admEl('admGroups').addEventListener('change', e => {
   adminChanged();
 });
 admEl('admBreak').addEventListener('change', e => { if (admCanEdit()) { game.isBreak = e.target.checked; adminChanged(); } });
-admEl('admFree').addEventListener('change', e => { if (admCanEdit()) { game.freeShot = e.target.checked; adminChanged(); } });
+admEl('admFree').addEventListener('change', e => { if (admCanEdit()) { game.freeShot = game.extraVisit = e.target.checked; adminChanged(); } });
 admEl('admHand').addEventListener('change', e => {
   if (!admCanEdit()) return;
   game.ballInHand = e.target.value || null;
