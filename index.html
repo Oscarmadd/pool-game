@@ -79,6 +79,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <div class="grow"></div>
   <label class="sel"><span>Rules</span><select id="rulesSel" aria-label="Rules"></select></label>
   <label class="sel"><span>Table</span><select id="tableSel" aria-label="Table size"></select></label>
+  <button id="viewBtn" aria-pressed="false" title="Look down on the whole table without shooting (T)">Overview</button>
   <button id="soundBtn" aria-pressed="true">Sound</button>
   <button id="rackBtn">Re-rack</button>
 </header>
@@ -391,7 +392,11 @@ function updateUI() {
   const v = typeof view === 'undefined' ? 'top' : view;
   document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over);
   h.hidden = state !== 'aim' || game.over;
-  if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D)' + (game.ballInHand ? ' · V moves the white' : '');
+  const vb = document.getElementById('viewBtn'), look = typeof looking !== 'undefined' && looking;
+  vb.setAttribute('aria-pressed', look);
+  vb.disabled = state !== 'aim' || game.over || (v === 'top' && !look);
+  if (look) h.textContent = 'Just looking, no shooting · press T or Overview to get back down on your shot';
+  else if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D)' + (game.ballInHand ? ' · V moves the white' : '');
   else if (game.ballInHand) h.textContent = game.ballInHand === 'baulk-optional'
       ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
       : 'Drag the white to place it' + (game.ballInHand === 'baulk' ? ' behind the baulk line' : '') + ' · press anywhere else to get down on the shot';
@@ -1047,6 +1052,9 @@ const el = renderer.domElement;
 // In cue view a drag is either sideways (turn the aim) or downwards (pull the cue back);
 // whichever way you move first decides which.
 let view = 'top';
+// Overview ("just looking"): pop up to the top view from a shot to check the table. You can't shoot or
+// move the white while it's on, and turning it off drops you back on the same aim.
+let looking = false;
 let gesture = null;   // the current cue-view drag: where it started and what it's doing
 
 function turnAim(rad) {
@@ -1081,7 +1089,7 @@ el.addEventListener('pointermove', e => {
     return;
   }
   // Top view: the only thing you can do is move the white (ball in hand)
-  if (view !== 'top' || camBlend > 0) return;
+  if (view !== 'top' || camBlend > 0 || looking) return;
   const p = tablePoint(e); if (!p) return;
   if (placing) { placeCue(p); return; }
   el.style.cursor = canPlace() && Math.hypot(p.x - cue.x, p.z - cue.z) < cue.r * 2.5 ? 'grab' : '';
@@ -1089,7 +1097,7 @@ el.addEventListener('pointermove', e => {
 
 el.addEventListener('pointerdown', () => audioInit(), true);
 el.addEventListener('pointerdown', e => {
-  if (state !== 'aim' || game.over || pendingView) return;
+  if (state !== 'aim' || game.over || pendingView || looking) return;
   if (view === 'top') {
     const p = tablePoint(e);
     // Ball in hand: grabbing the white moves it
@@ -1123,6 +1131,17 @@ function setView(v) {
   view = v;
   updateUI();
 }
+
+// Overview on/off. Only from the cue view while it's your shot; the aim is left exactly as it was.
+function setLook(on) {
+  if (on === looking || state !== 'aim' || game.over || pendingView || placing) return;
+  if (on && view !== 'cue') return;
+  gesture = null; power = 0; updatePower();
+  looking = on;
+  view = on ? 'top' : 'cue';
+  updateUI();
+}
+document.getElementById('viewBtn').addEventListener('click', () => { audioInit(); setLook(!looking); });
 
 // --- Spin dial: where the cue tip will hit the white ---
 // spin.x: -1 (far left) .. 1 (far right), spin.y: -1 (bottom = back spin) .. 1 (top = top spin)
@@ -1166,6 +1185,9 @@ addEventListener('keydown', () => audioInit(), true);
 addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('select')) return;
   if (state !== 'aim' || game.over) return;
+  // T (or the Overview button) toggles the "just looking" top view; Esc also leaves it
+  if (e.key === 't' || e.key === 'T' || (looking && e.key === 'Escape')) { setLook(!looking); return; }
+  if (looking) return;   // no aiming, spin or ball in hand while just looking
   // With ball in hand you can pop back up (V or Esc) to move the white again
   if ((e.key === 'v' || e.key === 'V' || e.key === 'Escape') && canPlace() && view === 'cue') { setView('top'); return; }
   if ((e.key === 'v' || e.key === 'V') && view === 'top') { autoAim(); setView('cue'); return; }
@@ -1355,36 +1377,74 @@ let camBlend = 0;
 const SWOOP_TIME = 0.75;   // seconds for the camera to swoop up or down
 let frozen = false;        // while true the normal cue-view pose is left alone (the chase cam is driving it)
 
-// --- Chase cam: after the shot the camera rides along behind the cue ball ---
-// As soon as the white hits a ball, the camera switches to following THAT ball instead.
-// It points the way its ball is travelling, but turns smoothly so bounces don't jerk the view.
-// It stays down until that ball has nearly stopped (or dropped in a pocket), then rises to watch the rest.
+// --- Chase cam: after the shot the camera stays down and follows the action ---
+// It frames every ball the shot has set moving, cue ball included. While only the white is running it
+// rides close behind it; as more balls get knocked into motion it pulls back and climbs to keep them all
+// in shot, and it closes back in as they stop. A potted ball stays in the frame (at its pocket) until it
+// has dropped. The heading turns smoothly towards the way the balls are going overall.
+// It stays down for at least CHASE_MIN, until everything has (nearly) stopped, but never past CHASE_MAX.
 const CHASE_MIN = 1.2, CHASE_MAX = 6;   // seconds: always follow at least this long, never longer than that
-let chasing = false, chaseTime = 0, chasePotted = 0;
-const chaseDir = new THREE.Vector3(), chaseWant = new THREE.Vector3();
+const CHASE_STOP = 0.12;                // a ball slower than this (m/s) counts as stopped and leaves the frame
+const POT_WATCH = 0.9;                  // seconds a potted ball stays in the frame while it drops
+let chasing = false, chaseTime = 0, chaseR = 0;
+const chaseMoved = new Set(), chasePotAt = new Map();
+const chaseDir = new THREE.Vector3(), chaseWant = new THREE.Vector3(), chaseC = new THREE.Vector3(), chaseFlow = new THREE.Vector3();
 function startChase() {
-  chasing = true; chaseTime = 0; chasePotted = 0;
+  chasing = true; chaseTime = 0; chaseR = 0;
+  chaseMoved.clear(); chasePotAt.clear();
   chaseDir.set(aim.x, 0, aim.z);
+  chaseC.set(cue.x, 0, cue.z);
 }
 function updateChase(dt) {
   chaseTime += dt;
-  const b = (shot && shot.firstBall) || cue;   // the white until it hits something, then the ball it hit
-  // where the ball is: if it's dropping into a pocket, use the pocket so the camera watches it go in
-  const f = falling.find(q => q.b === b);
-  const bx = f ? f.p.x : b.x, bz = f ? f.p.z : b.z;
-  const speed = Math.hypot(b.vx, b.vz);
-  if (b.potted) chasePotted += dt;
-  if ((speed < 0.12 && !b.potted && chaseTime > CHASE_MIN) || chaseTime > CHASE_MAX || chasePotted > 0.9) { chasing = false; return; }
-  // Turn the camera's heading towards the direction its ball is moving (only when it's moving properly)
-  if (speed > 0.05 && !b.potted) {
-    chaseWant.set(b.vx / speed, 0, b.vz / speed);
-    chaseDir.lerp(chaseWant, 1 - Math.exp(-dt * 2.5)).normalize();
+  // Which balls are in the action: anything moving, plus anything still dropping into a pocket
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, n = 0;
+  const pts = [];
+  chaseFlow.set(0, 0, 0);
+  for (const b of balls) {
+    const speed = Math.hypot(b.vx, b.vz);
+    if (!b.potted && speed > CHASE_STOP) chaseMoved.add(b);
+    if (!chaseMoved.has(b)) continue;
+    let x = b.x, z = b.z;
+    if (b.potted) {
+      if (!chasePotAt.has(b)) chasePotAt.set(b, chaseTime);
+      if (chaseTime - chasePotAt.get(b) > POT_WATCH) continue;
+      const f = falling.find(q => q.b === b);
+      if (f) { x = f.p.x; z = f.p.z; }   // watch the pocket it's going into
+    } else if (speed <= CHASE_STOP) continue;
+    else chaseFlow.x += b.vx, chaseFlow.z += b.vz;
+    pts.push(x, z); n++;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
   }
-  // Ease the camera towards a spot behind and above the ball, looking a little ahead of it
-  const follow = 1 - Math.exp(-dt * 7);   // bigger number = camera sticks closer to the ball
-  chaseWant.set(bx - chaseDir.x * 0.75, b.r + 0.24, bz - chaseDir.z * 0.75);
+  if ((n === 0 && chaseTime > CHASE_MIN) || chaseTime > CHASE_MAX) { chasing = false; return; }
+  if (n > 0) {
+    // Centre of the group, and how big a circle it needs to fit everything in
+    const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+    let r = 0;
+    for (let i = 0; i < pts.length; i += 2) r = Math.max(r, Math.hypot(pts[i] - cx, pts[i + 1] - cz));
+    chaseC.lerp(chaseWant.set(cx, 0, cz), 1 - Math.exp(-dt * 4));
+    // widen quickly when the action spreads, tighten more gently when balls stop
+    chaseR += (r - chaseR) * (1 - Math.exp(-dt * (r > chaseR ? 8 : 1.6)));
+    // Turn towards the overall direction of travel (summed velocities, so a spread doesn't cancel out the heading)
+    const flow = Math.hypot(chaseFlow.x, chaseFlow.z);
+    if (flow > 0.05) {
+      chaseWant.set(chaseFlow.x / flow, 0, chaseFlow.z / flow);
+      chaseDir.lerp(chaseWant, 1 - Math.exp(-dt * 2.5)).normalize();
+    }
+  }
+  // How far back to sit so a circle of radius chaseR fits on screen (narrowest of the two fields of view)
+  const halfV = THREE.MathUtils.degToRad(cuePose.fov / 2);
+  const half = Math.min(halfV, Math.atan(Math.tan(halfV) * camera.aspect));
+  const R = chaseR + 0.08;                        // a ball and a bit of margin round the edge of the group
+  const dist = Math.max(0.79, R / Math.sin(half));
+  // Low and close for one ball; climbs higher as the group spreads so balls don't hide behind each other
+  const elev = 0.31 + 0.6 * Math.min(1, chaseR / 0.9);
+  const back = dist * Math.cos(elev), up = dist * Math.sin(elev);
+  const ahead = 0.5 / (1 + chaseR * 6);           // look a little ahead of a lone ball, straight at a group
+  const follow = 1 - Math.exp(-dt * 7);           // bigger number = camera sticks closer to the action
+  chaseWant.set(chaseC.x - chaseDir.x * back, cue.r + up, chaseC.z - chaseDir.z * back);
   cuePose.pos.lerp(chaseWant, follow);
-  chaseWant.set(bx + chaseDir.x * 0.5, 0, bz + chaseDir.z * 0.5);
+  chaseWant.set(chaseC.x + chaseDir.x * ahead, 0, chaseC.z + chaseDir.z * ahead);
   cuePose.look.lerp(chaseWant, follow);
 }
 let pendingView = null;    // the view to go to next, once the camera has risen
@@ -1401,7 +1461,7 @@ function updateCamera(dt) {
     // Balls have stopped: finish rising first, then head for the next view
     goal = 0;
     if (camBlend === 0) {
-      frozen = false;
+      frozen = false; looking = false;
       if (pendingView === 'cue') autoAim();
       view = pendingView; pendingView = null;
       updateUI();
