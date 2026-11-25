@@ -119,9 +119,10 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #admRead{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);background:#0f0d0b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;margin:0}
 #admin .note{font-size:12px;color:var(--dim);margin:0}
 #admin [disabled]{opacity:.45;cursor:default}
+.vol{display:flex;align-items:center;gap:8px}#volSlider{width:90px;accent-color:var(--brass);cursor:pointer}
 @media(max-width:1100px){h1 span{display:none}}
 @media(max-width:940px){.sel span{display:none}}
-@media(max-width:600px){h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
+@media(max-width:600px){#volSlider{width:64px}h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
 
 </style>
 </head>
@@ -132,7 +133,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <label class="sel"><span>Rules</span><select id="rulesSel" aria-label="Rules"></select></label>
   <label class="sel"><span>Table</span><select id="tableSel" aria-label="Table size"></select></label>
   <button id="viewBtn" aria-pressed="false" title="Look down on the whole table without shooting (T)">Overview</button>
-  <button id="soundBtn" aria-pressed="true">Sound</button>
+  <span class="vol"><button id="soundBtn" aria-pressed="true" title="Sound on/off">Sound</button><input id="volSlider" type="range" min="0" max="100" step="1" aria-label="Volume" title="Volume"></span>
   <button id="onlineBtn" aria-pressed="false" title="Play a friend over the internet">Online</button>
   <button id="rackBtn">Re-rack</button>
 </header>
@@ -925,7 +926,7 @@ function step(h) {
       // Impulse = the "kick" each ball gets along the line between them. A lighter ball gets
       // pushed more by the same kick (that's why a UK cue ball follows through after a hit).
       const kick = closing * (1 + BALL_BOUNCE) / (1 / a.m + 1 / b.m);
-      sfxClick(closing, (a.x + b.x) / 2, (a.z + b.z) / 2);
+      sfxClick(closing, (a.x + b.x) / 2, (a.z + b.z) / 2, a, b);
       a.vx -= kick / a.m * nx; a.vz -= kick / a.m * nz; b.vx += kick / b.m * nx; b.vz += kick / b.m * nz;
       throwBalls(a, b, nx, nz, kick);
       if (back) { a.x -= a.vx * back; a.z -= a.vz * back; b.x -= b.vx * back; b.z -= b.vz * back; }   // catch up the time we wound back
@@ -955,7 +956,7 @@ function step(h) {
       if (into < 0) {
         bounceOffCushion(b, nx, nz, into);
         hitCushion(into, b);
-        sfxThud(-into, b.x, b.z);
+        sfxThud(-into, b.x, b.z, b);
       }
     }
     // Pockets: once the centre is close enough to a pocket centre, the ball falls in
@@ -1085,7 +1086,7 @@ function shoot() {
 // Hit the white: p = aim direction (ax, az), power 0..1, and where the tip hits (sx, sy, -1..1)
 function strike(p) {
   adminSnapshot();   // admin panel: lets you undo this shot (yours, or your friend's when you're watching it)
-  sfxStrike(p.power, cue.x, cue.z);
+  sfxStrike(p.power * (p.ps > 0 ? Math.min(2, p.ps) : 1), cue.x, cue.z, p.brk !== undefined ? p.brk : game.isBreak);
   launchCue(p);
   // Everything the rules need to know about this shot gets recorded in here as it plays out
   seedAim(p);   // decides where the cue points for the next shot
@@ -1425,13 +1426,28 @@ addEventListener('keydown', e => {
 });
 
 // ================================================================
-// SOUND (all made in code with the Web Audio API – no sound files)
+// SOUND (all made in code with the Web Audio API – no sound files, nothing recorded or copyrighted)
 // ================================================================
-// Each sound is a few short "voices": a tone (oscillator) and/or a burst of filtered noise, each with a
-// volume envelope that jumps up and dies away. Harder hits = louder and brighter.
-// Sounds are panned left/right by where they are relative to the camera, and get quieter with distance.
-const sound = { ctx: null, on: true, master: null, noise: null, rollGain: null, lastClick: 0 };
-try { sound.on = localStorage.getItem('pool-sound') !== 'off'; } catch (e) {}
+// When sound first starts, each kind of hit is "recorded" once into a short sample built from ringing
+// tones and noise, the way a real hit sounds: a sharp attack, then the ringing dies away. Each kind gets
+// several takes at a few hardnesses (a harder hit rings brighter and longer, not just louder). Playing a
+// hit is then just playing a sample back, which is cheap enough for the forty-odd clacks of a break.
+// Every play picks a different take and nudges its pitch, so no two clacks are quite the same.
+//   - Timing: hits are timed to the physics step they happen in, not the screen frame, so a break
+//     rattles through the pack instead of landing in lumps.
+//   - Place: panned left/right by where they are relative to the camera, quieter further away.
+//   - Room: a little synthetic room echo, so it sounds like a table in a room rather than in your ear.
+//   - No spam: the same pair of balls (or ball and cushion) can't re-sound within 60 ms unless it's
+//     much harder, and only so many quiet hits can sound at once. Resting balls nudging make no noise.
+// Your friend's shot, played back on your table online, runs the same physics, so you hear it too.
+const sound = { ctx: null, on: true, vol: 0.8, master: null, bank: {}, rollGain: null, rollLp: null, gullyGain: null,
+                at: 0, recent: [], last: new Map(), lastTake: {} };
+try {
+  sound.on = localStorage.getItem('pool-sound') !== 'off';
+  const v = parseFloat(localStorage.getItem('pool-volume'));
+  if (v >= 0 && v <= 1) sound.vol = v;
+} catch (e) {}
+const masterLevel = () => sound.on ? 1.2 * sound.vol * sound.vol : 0;   // squared, so the slider feels even
 
 function audioInit() {
   if (sound.ctx) { if (sound.ctx.state === 'suspended') sound.ctx.resume(); return; }
@@ -1439,22 +1455,148 @@ function audioInit() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     const ctx = sound.ctx = new AC();
+    // master volume -> limiter (so a break full of clacks can't distort) -> speakers, plus a room echo
     sound.master = ctx.createGain();
-    sound.master.gain.value = sound.on ? 0.9 : 0;
-    sound.master.connect(ctx.destination);
-    // one second of white noise, reused by every noisy sound
-    const buf = sound.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    // the rolling rumble: noise through a low filter, always running, volume follows the balls
-    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
-    sound.rollGain = ctx.createGain(); sound.rollGain.gain.value = 0;
-    src.connect(lp).connect(sound.rollGain).connect(sound.master);
-    src.start();
+    sound.master.gain.value = masterLevel();
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -9; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.002; lim.release.value = 0.12;
+    sound.master.connect(lim).connect(ctx.destination);
+    const room = ctx.createConvolver(), wet = ctx.createGain();
+    room.buffer = roomEcho(ctx); wet.gain.value = 0.22;
+    sound.master.connect(room).connect(wet).connect(lim);
+    buildBank();
+    // two always-running rumbles whose volume follows what's moving: balls on the cloth, and balls in the gully
+    const loop = render(2, (d, sr) => { for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }, false);
+    const rumble = (freq, q) => {
+      const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = loop; src.loop = true; src.playbackRate.value = 0.8 + Math.random() * 0.4;
+      lp.type = 'lowpass'; lp.frequency.value = freq; lp.Q.value = q; g.gain.value = 0;
+      src.connect(lp).connect(g).connect(sound.master); src.start();
+      return [g, lp];
+    };
+    [sound.rollGain, sound.rollLp] = rumble(260, 0.7);
+    [sound.gullyGain] = rumble(420, 2.5);
   } catch (e) { sound.ctx = null; }
 }
-const audioReady = () => sound.ctx && sound.ctx.state === 'running' && sound.on && !admin.sim;   // silent while the admin shot finder tries shots
+// Start sound on the first tap or key press anywhere (browsers won't play sound before that)
+addEventListener('pointerdown', () => audioInit(), true);
+addEventListener('touchend', () => audioInit(), true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && sound.ctx && sound.ctx.state === 'suspended') sound.ctx.resume(); });
+const audioReady = () => sound.ctx && sound.ctx.state === 'running' && sound.on && sound.vol > 0 && !admin.sim;   // silent while the admin shot finder tries shots
+
+// ---- making the samples ----
+// render(len, fill): a mono sample `len` seconds long, filled by fill(data, sampleRate), scaled to a peak of 0.9
+function render(len, fill, normalise = true) {
+  const ctx = sound.ctx, n = Math.ceil(len * ctx.sampleRate), buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  fill(d, ctx.sampleRate);
+  if (normalise) {
+    let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i]));
+    if (pk > 0) for (let i = 0; i < n; i++) d[i] *= 0.9 / pk;
+  }
+  return buf;
+}
+// Ringing tones: each [freq Hz, decay s, level, glide, start s]. glide makes the pitch start a little high
+// and settle (the "boing" of soft rubber or wood being knocked).
+function ring(d, sr, modes) {
+  for (const [f, dec, amp, glide = 0, at = 0] of modes) {
+    let ph = 0;
+    const i0 = Math.floor(at * sr), end = Math.min(d.length, i0 + Math.ceil(dec * 7 * sr));
+    for (let i = i0; i < end; i++) {
+      const t = (i - i0) / sr;
+      ph += 2 * Math.PI * f * (1 + glide * Math.exp(-t / 0.012)) / sr;
+      d[i] += amp * Math.sin(ph) * Math.exp(-t / dec) * (1 - Math.exp(-t / 0.00025));
+    }
+  }
+}
+// A burst of noise through a filter ('lp' thuddy, 'hp' crisp, 'bp' in between), fading over `dec` seconds
+function hiss(d, sr, type, freq, q, dec, amp, at = 0) {
+  const i0 = Math.floor(at * sr), n = Math.min(d.length - i0, Math.ceil(dec * 7 * sr)), x = new Float32Array(n);
+  for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.exp(-i / sr / dec);
+  biquad(x, sr, type, freq, q);
+  for (let i = 0; i < n; i++) d[i0 + i] += amp * x[i];
+}
+// A standard digital filter (RBJ cookbook biquad), applied in place
+function biquad(x, sr, type, f, q) {
+  const w = 2 * Math.PI * Math.min(f, sr * 0.45) / sr, cs = Math.cos(w), al = Math.sin(w) / (2 * q);
+  let b0, b1, b2;
+  if (type === 'lp') { b0 = (1 - cs) / 2; b1 = 1 - cs; b2 = b0; }
+  else if (type === 'hp') { b0 = (1 + cs) / 2; b1 = -(1 + cs); b2 = b0; }
+  else { b0 = al; b1 = 0; b2 = -al; }
+  const a0 = 1 + al, a1 = -2 * cs, a2 = 1 - al;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const y = (b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0;
+    x2 = x1; x1 = x[i]; y2 = y1; y1 = y; x[i] = y;
+  }
+  return x;
+}
+// A small room's echo: soft noise dying away over about a third of a second, dull at the top
+function roomEcho(ctx) {
+  const n = Math.ceil(0.45 * ctx.sampleRate), buf = ctx.createBuffer(2, n, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) { const t = i / ctx.sampleRate; d[i] = (Math.random() * 2 - 1) * Math.exp(-t / 0.09) * (t < 0.008 ? 0 : 1) * 0.5; }
+    biquad(d, ctx.sampleRate, 'lp', 3200, 0.6);
+  }
+  return buf;
+}
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// Every sound, as takes[hardness level][take]
+function buildBank() {
+  const bank = sound.bank, levels = (hs, takes, len, make) => hs.map(h => Array.from({ length: takes }, () => render(len, (d, sr) => make(d, sr, h))));
+  // Ball on ball: the hard, bright "clack" of two resin balls. Almost all of it is the instant of contact
+  // (a click) plus a quick high ring; harder hits ring brighter and a touch longer.
+  bank.clack = levels([0.1, 0.45, 0.8, 1], 4, 0.09, (d, sr, h) => {
+    const f = rnd(2300, 2800) + 700 * h;
+    hiss(d, sr, 'hp', 1800 + 1800 * h, 0.7, 0.0009 + 0.0006 * h, 1.1 + 0.6 * h);
+    ring(d, sr, [[f, 0.008 + 0.012 * h, 1], [f * rnd(1.42, 1.52), 0.006 + 0.007 * h, 0.5 + 0.4 * h],
+                 [f * rnd(2.05, 2.2), 0.004 + 0.004 * h, 0.15 + 0.45 * h], [f * rnd(2.8, 3.1), 0.003, 0.35 * h],
+                 [rnd(750, 950), 0.006, 0.3]]);
+  });
+  // Cue tip on the white: the leather tip softens it to a rounder "tock", with a low knock from the cue itself
+  bank.strike = levels([0.1, 0.4, 0.7, 1], 3, 0.14, (d, sr, h) => {
+    hiss(d, sr, 'bp', 1100 + 1700 * h, 0.8, 0.0022 - 0.0008 * h, 1.2);
+    ring(d, sr, [[rnd(980, 1100) + 400 * h, 0.012 + 0.006 * h, 0.7], [rnd(1900, 2100) + 700 * h, 0.006, 0.15 + 0.4 * h],
+                 [rnd(200, 240), 0.03, 0.35, 0.3], [rnd(480, 560), 0.014, 0.25]]);
+  });
+  // The break: the same, but a big crack on top
+  bank.break = levels([1], 3, 0.2, (d, sr) => {
+    hiss(d, sr, 'hp', 2200, 0.6, 0.0035, 1.4);
+    hiss(d, sr, 'bp', 2800, 0.8, 0.0016, 1.2);
+    ring(d, sr, [[rnd(1450, 1600), 0.02, 0.8], [rnd(2700, 2900), 0.01, 0.6], [rnd(3900, 4300), 0.006, 0.35],
+                 [rnd(190, 230), 0.045, 0.5, 0.4], [rnd(520, 600), 0.02, 0.3]]);
+  });
+  // Ball into a cushion: a dull rubber thump; harder hits also knock the wooden rail behind it
+  bank.cushion = levels([0.15, 0.55, 1], 3, 0.3, (d, sr, h) => {
+    hiss(d, sr, 'lp', 450 + 400 * h, 0.7, 0.008 + 0.006 * h, 0.7);
+    ring(d, sr, [[rnd(85, 105) + 35 * h, 0.045 + 0.03 * h, 1, 0.5], [rnd(170, 200), 0.025, 0.35, 0.3],
+                 [rnd(330, 400), 0.022, 0.45 * h], [rnd(780, 900), 0.01, 0.25 * h]]);
+  });
+  // Ball into a pocket: a knock on the leather/wood as it drops, a second as it lands on the runway,
+  // then the hollow rumble of rolling away inside the table towards the ball return
+  bank.pocket = levels([0.3, 1], 3, 0.95, (d, sr, h) => {
+    hiss(d, sr, 'lp', 900, 0.8, 0.008, 0.5);
+    ring(d, sr, [[rnd(170, 200), 0.04, 1, 0.4], [rnd(380, 450), 0.02, 0.5], [rnd(1100, 1300), 0.006, 0.25 * h]]);
+    const at = rnd(0.08, 0.11);
+    hiss(d, sr, 'lp', 700, 0.8, 0.007, 0.4, at);
+    ring(d, sr, [[rnd(140, 165), 0.05, 0.65, 0.3, at], [rnd(320, 360), 0.02, 0.3, 0, at]]);
+    // rolling away: low noise in a wooden channel, wobbling a little as the ball turns
+    const i0 = Math.floor((at + 0.04) * sr), n = d.length - i0, x = new Float32Array(n), wob = rnd(11, 16);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, env = Math.min(1, t / 0.08) * Math.max(0, 1 - t / (n / sr));
+      x[i] = (Math.random() * 2 - 1) * env * (0.8 + 0.2 * Math.sin(2 * Math.PI * wob * t));
+    }
+    biquad(x, sr, 'bp', rnd(170, 210), 3); biquad(x, sr, 'lp', 500, 0.7);
+    for (let i = 0; i < n; i++) d[i0 + i] += 1.6 * x[i];
+  });
+  // Wooden knock: a ball reaching the end of the ball return, or dropping out of the chute into it
+  bank.knock = levels([0.3, 1], 3, 0.12, (d, sr, h) => {
+    hiss(d, sr, 'bp', 900, 0.9, 0.003, 0.6);
+    ring(d, sr, [[rnd(420, 520), 0.025, 1, 0.2], [rnd(1150, 1300), 0.01, 0.3 + 0.3 * h], [rnd(210, 240), 0.03, 0.4]]);
+  });
+}
 
 // Where a sound is relative to the listener (the camera): pan -1 (left) .. 1 (right), and a distance fade
 const camSpace = new THREE.Vector3();
@@ -1465,96 +1607,96 @@ function placeSound(x, z) {
   return { pan, fade: 1 / (1 + flat * 0.3) };
 }
 
-// Plumbing for one sound: returns a node to plug voices into, already panned and faded
-function out(x, z, vol) {
-  const ctx = sound.ctx, { pan, fade } = placeSound(x, z);
-  const g = ctx.createGain(); g.gain.value = vol * fade;
-  if (ctx.createStereoPanner) {
-    const p = ctx.createStereoPanner(); p.pan.value = pan;
-    g.connect(p).connect(sound.master);
-  } else g.connect(sound.master);
-  return g;
-}
-// A tone that slides from f1 to f2 and dies away over `len` seconds
-function tone(dest, t, f1, f2, len, vol, type = 'sine') {
-  const ctx = sound.ctx, o = ctx.createOscillator(), g = ctx.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(f1, t);
-  o.frequency.exponentialRampToValueAtTime(f2, t + len);
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(vol, t + 0.002);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
-  o.connect(g).connect(dest);
-  o.start(t); o.stop(t + len + 0.02);
-}
-// A burst of noise through a filter (bandpass = "clicky", lowpass = "thuddy")
-function burst(dest, t, type, freq, q, len, vol) {
-  const ctx = sound.ctx, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
-  src.buffer = sound.noise;
-  f.type = type; f.frequency.value = freq; f.Q.value = q;
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(vol, t + 0.002);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
-  src.connect(f).connect(g).connect(dest);
-  src.start(t, Math.random() * 0.5); src.stop(t + len + 0.02);
+// Play sound `name`. hard = 0..1 picks the take (brighter when harder), vol = loudness,
+// x/z = where on the table (leave out for things off the table, like the ball return).
+// key = what made it (a pair of balls, a ball and a cushion…), so the same contact can't machine-gun.
+function play(name, hard, vol, x, z, key) {
+  if (!audioReady() || vol < 0.004) return;
+  const ctx = sound.ctx, t = Math.max(ctx.currentTime, sound.at);
+  if (key !== undefined) {
+    const prev = sound.last.get(key);
+    if (prev && t - prev.t < 0.06 && vol < prev.vol * 1.6) return;
+    sound.last.set(key, { t, vol });
+    if (sound.last.size > 400) sound.last.clear();
+  }
+  // at most 14 sounds starting in any 50 ms; once busy, only the louder ones get through
+  sound.recent = sound.recent.filter(s => s > t - 0.05);
+  if (sound.recent.length >= 14 || (sound.recent.length >= 8 && vol < 0.25)) return;
+  sound.recent.push(t);
+  const levels = sound.bank[name], lvl = levels[Math.min(levels.length - 1, Math.floor(hard * levels.length))];
+  let take = Math.floor(Math.random() * lvl.length);
+  if (lvl.length > 1 && take === sound.lastTake[name]) take = (take + 1) % lvl.length;
+  sound.lastTake[name] = take;
+  const src = ctx.createBufferSource(), g = ctx.createGain();
+  src.buffer = lvl[take];
+  src.playbackRate.value = 1 + (Math.random() - 0.5) * 0.06;
+  let dest = sound.master;
+  if (x !== undefined) {
+    const { pan, fade } = placeSound(x, z);
+    vol *= fade;
+    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; p.connect(dest); dest = p; }
+  }
+  g.gain.value = vol;
+  src.connect(g).connect(dest);
+  src.start(t);
 }
 
-// Cue tip on the white: a short leathery "tock"
-function sfxStrike(pw, x, z) {
-  if (!audioReady()) return;
-  const t = sound.ctx.currentTime, o = out(x, z, 0.35 + pw * 0.65);
-  burst(o, t, 'bandpass', 1400 + pw * 1400, 0.9, 0.045, 0.6);
-  tone(o, t, 700, 320, 0.05, 0.35, 'triangle');
+// Cue tip on the white. pw = power 0..1
+function sfxStrike(pw, x, z, brk) {
+  pw = Math.min(1, pw);
+  if (brk && pw > 0.55) play('break', 1, 0.75 + pw * 0.25, x, z);
+  else play('strike', pw, 0.22 + pw * 0.78, x, z);
 }
-// Ball on ball: the sharp clack. speed = how fast they came together (m/s)
-function sfxClick(speed, x, z) {
-  if (!audioReady() || speed < 0.04) return;
-  const t = sound.ctx.currentTime;
-  const loud = Math.min(1, speed / 3) ** 0.7;
-  // don't machine-gun: skip a quieter click that lands right on top of the last one
-  if (t - sound.lastClick < 0.01 && loud < 0.5) return;
-  sound.lastClick = t;
-  const o = out(x, z, loud);
-  const pitch = 2600 + loud * 1400 + Math.random() * 300;
-  tone(o, t, pitch, pitch * 0.92, 0.03 + loud * 0.02, 0.5);
-  burst(o, t, 'bandpass', 4200, 1.4, 0.018, 0.5);
+// Ball on ball. speed = how fast they came together (m/s); below about 3 cm/s it's a silent kiss
+function sfxClick(speed, x, z, a, b) {
+  if (speed < 0.03) return;
+  const k = Math.min(1, speed / 5);
+  play('clack', k ** 0.6, 0.06 + 0.94 * k ** 0.7, x, z, Math.min(a.n, b.n) * 64 + Math.max(a.n, b.n));
 }
-// Ball into a cushion: a soft rubbery thump
-function sfxThud(speed, x, z) {
-  if (!audioReady() || speed < 0.05) return;
-  const t = sound.ctx.currentTime, loud = Math.min(1, speed / 3) ** 0.8;
-  const o = out(x, z, loud * 0.8);
-  tone(o, t, 150, 70, 0.11, 0.7);
-  burst(o, t, 'lowpass', 700, 0.7, 0.06, 0.4);
+// Ball into a cushion (or a pocket jaw)
+function sfxThud(speed, x, z, b) {
+  if (speed < 0.05) return;
+  const k = Math.min(1, speed / 4);
+  play('cushion', k ** 0.7, 0.1 + 0.9 * k ** 0.8, x, z, 5000 + b.n);
 }
-// Ball into a pocket: a knock or two on the way in, then a low rumble as it rolls away under the table
+// Ball into a pocket
 function sfxDrop(speed, x, z) {
-  if (!audioReady()) return;
-  const t = sound.ctx.currentTime, loud = 0.45 + Math.min(1, speed / 2) * 0.55;
-  const o = out(x, z, loud);
-  tone(o, t, 240, 120, 0.07, 0.6);
-  burst(o, t, 'lowpass', 900, 0.8, 0.05, 0.35);
-  tone(o, t + 0.11, 190, 95, 0.08, 0.4);
-  burst(o, t + 0.16, 'lowpass', 260, 0.6, 0.55, 0.22);   // rolling down the return
+  play('pocket', Math.min(1, speed / 2), 0.55 + Math.min(1, speed / 2) * 0.45, x, z);
 }
-// Rolling: the faint rumble of balls on cloth, louder the more is moving
-function sfxRolling() {
+// Ball return: ball rolling into the one in front (a clack) or the end of the gully (a knock)
+function sfxRack(speed, end) {
+  if (speed < 0.6) return;
+  const k = Math.min(1, speed / 9);
+  if (end) play('knock', k, 0.12 + 0.3 * k);
+  else play('clack', k * 0.6, 0.08 + 0.3 * k);
+}
+// Ball return: a ball dropping out of the chute onto the gully
+const sfxChute = () => play('knock', 0.2, 0.12);
+// Rolling: the soft rumble of balls on the cloth, louder and a little brighter the more is moving.
+// gully = how fast balls are rolling along the ball return.
+function sfxRolling(gully) {
   if (!sound.ctx || !sound.rollGain) return;
   let total = 0;
-  if (state === 'moving') for (const b of balls) if (!b.potted) total += Math.hypot(b.vx, b.vz);
-  const target = sound.on ? Math.min(0.16, total * 0.035) : 0;
-  sound.rollGain.gain.setTargetAtTime(target, sound.ctx.currentTime, 0.08);
+  if (state === 'moving' && !admin.sim) for (const b of balls) if (!b.potted) total += Math.hypot(b.vx, b.vz);
+  const t = sound.ctx.currentTime;
+  sound.rollGain.gain.setTargetAtTime(Math.min(0.2, total * 0.04), t, 0.08);
+  sound.rollLp.frequency.setTargetAtTime(180 + Math.min(400, total * 70), t, 0.1);
+  sound.gullyGain.gain.setTargetAtTime(Math.min(0.12, gully * 0.012), t, 0.05);
 }
 
-const soundBtn = document.getElementById('soundBtn');
-soundBtn.setAttribute('aria-pressed', sound.on);
-soundBtn.addEventListener('click', () => {
-  audioInit();
-  sound.on = !sound.on;
+// Sound button = mute on/off; the slider beside it sets the volume
+const soundBtn = document.getElementById('soundBtn'), volSlider = document.getElementById('volSlider');
+function showSound() {
   soundBtn.setAttribute('aria-pressed', sound.on);
-  if (sound.master) sound.master.gain.value = sound.on ? 0.9 : 0;
-  try { localStorage.setItem('pool-sound', sound.on ? 'on' : 'off'); } catch (e) {}
-});
+  soundBtn.textContent = sound.on ? 'Sound' : 'Muted';
+  volSlider.value = Math.round(sound.vol * 100);
+  if (sound.master) sound.master.gain.setTargetAtTime(masterLevel(), sound.ctx.currentTime, 0.02);
+  try { localStorage.setItem('pool-sound', sound.on ? 'on' : 'off'); localStorage.setItem('pool-volume', sound.vol); } catch (e) {}
+}
+showSound();
+soundBtn.addEventListener('click', () => { audioInit(); sound.on = !sound.on; if (sound.on && sound.vol < 0.05) sound.vol = 0.5; showSound(); });
+volSlider.addEventListener('input', () => { audioInit(); sound.vol = volSlider.value / 100; sound.on = sound.vol > 0; showSound(); });
+volSlider.addEventListener('change', () => play('clack', 0.6, 0.7));   // a sample clack at the new level
 
 // The number is the real strength: meter fill times the admin panel's max power (so a full meter at 150% max reads 150%)
 function updatePower() {
@@ -1809,15 +1951,9 @@ function rackBall(n) {
   rackTrack.appendChild(el);
   return { el, face };
 }
-// A ball rolling into the one in front (or the end of the gully): a small clack, not placed on the table
-function sfxRack(speed, end) {
-  if (!audioReady() || speed < 0.6) return;
-  const t = sound.ctx.currentTime, g = sound.ctx.createGain(), loud = Math.min(1, speed / 8);
-  g.gain.value = 0.12 + loud * 0.25; g.connect(sound.master);
-  if (end) { tone(g, t, 520, 300, 0.06, 0.5); burst(g, t, 'lowpass', 900, 0.7, 0.04, 0.3); }
-  else { tone(g, t, 2300, 2100, 0.03, 0.45); burst(g, t, 'bandpass', 3800, 1.4, 0.015, 0.35); }
-}
+let rackRolling = 0;   // how fast balls are rolling along the gully this frame (for the rumble)
 function updateRack(dt) {
+  rackRolling = 0;
   rackQueue = Math.max(0, rackQueue - dt);
   if (rackSet !== RULE.ballSet) { for (const it of rackItems.values()) it.el.remove(); rackItems.clear(); rackSet = RULE.ballSet; }
   const potted = balls.filter(b => b.potted && b.n !== 0).sort((a, b) => (a.potIdx || 0) - (b.potIdx || 0) || a.n - b.n);
@@ -1838,9 +1974,11 @@ function updateRack(dt) {
     it.el.style.visibility = 'visible';
     if (it.y < 0) {   // dropping out of the chute
       it.vy += 40 * dt; it.y = Math.min(0, it.y + it.vy * dt);
+      if (it.y === 0) sfxChute();
     } else if (it.x > it.target + 0.0005 || it.v !== 0) {   // the gully slopes down to the left
       it.v = Math.max(-11, it.v - 16 * dt);
       it.x += it.v * dt;
+      rackRolling += -it.v;
       if (it.x <= it.target) {   // bumped the ball in front (or the end): a little bounce, then settle
         sfxRack(-it.v, it.target === 0);
         it.x = it.target;
@@ -1865,11 +2003,14 @@ function frame(now) {
   if (state === 'moving' && !(net.watch && net.watch.done)) {
     physTime += dt * admin.timeScale;   // admin panel slow motion (just on your own screen)
     let stopped = false;
+    const audioT = sound.ctx ? sound.ctx.currentTime + 0.025 : 0;
     for (let i = 0; physTime >= PHYS_H && i < 40; i++) {
       physTime -= PHYS_H;
+      sound.at = audioT + i * PHYS_H / admin.timeScale;   // each hit sounds at its own moment, not all at once per frame
       step(PHYS_H);
       if (!anyMoving()) { stopped = true; break; }
     }
+    sound.at = 0;
     syncMeshes(dt);
     if (stopped) {
       if (net.watch) net.watch.done = true;   // watching a friend's shot: wait for their result
@@ -1881,7 +2022,7 @@ function frame(now) {
   updateRack(dt);
   updateAimVisuals();
   updateCamera(dt);
-  sfxRolling();
+  sfxRolling(rackRolling);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
