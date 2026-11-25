@@ -1428,8 +1428,9 @@ addEventListener('keydown', e => {
 // ================================================================
 // SOUND (all made in code with the Web Audio API – no sound files, nothing recorded or copyrighted)
 // ================================================================
-// When sound first starts, each kind of hit is "recorded" once into a short sample built from ringing
-// tones and noise, the way a real hit sounds: a sharp attack, then the ringing dies away. Each kind gets
+// When sound first starts, each kind of hit is "recorded" once into a short sample. A hit is built
+// mainly from a single impact pulse (the length of the contact sets how sharp it is) plus a dab of
+// noise, with only very damped tones, so balls sound solid rather than glassy. Each kind gets
 // several takes at a few hardnesses (a harder hit rings brighter and longer, not just louder). Playing a
 // hit is then just playing a sample back, which is cheap enough for the forty-odd clacks of a break.
 // Every play picks a different take and nudges its pitch, so no two clacks are quite the same.
@@ -1462,7 +1463,7 @@ function audioInit() {
     lim.threshold.value = -9; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.002; lim.release.value = 0.12;
     sound.master.connect(lim).connect(ctx.destination);
     const room = ctx.createConvolver(), wet = ctx.createGain();
-    room.buffer = roomEcho(ctx); wet.gain.value = 0.22;
+    room.buffer = roomEcho(ctx); wet.gain.value = 0.1;
     sound.master.connect(room).connect(wet).connect(lim);
     buildBank();
     // two always-running rumbles whose volume follows what's moving: balls on the cloth, and balls in the gully
@@ -1509,6 +1510,12 @@ function ring(d, sr, modes) {
     }
   }
 }
+// One impact: the push of air as two hard things meet, a single up-down swing lasting `w` seconds
+// (how long they're in contact). Short = sharp and bright, long = soft and dull.
+function pulse(d, sr, w, amp, at = 0) {
+  const i0 = Math.floor(at * sr), n = Math.max(2, Math.round(w * sr));
+  for (let i = 0; i < n && i0 + i < d.length; i++) d[i0 + i] += amp * Math.sin(2 * Math.PI * i / n);
+}
 // A burst of noise through a filter ('lp' thuddy, 'hp' crisp, 'bp' in between), fading over `dec` seconds
 function hiss(d, sr, type, freq, q, dec, amp, at = 0) {
   const i0 = Math.floor(at * sr), n = Math.min(d.length - i0, Math.ceil(dec * 7 * sr)), x = new Float32Array(n);
@@ -1546,42 +1553,46 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 // Every sound, as takes[hardness level][take]
 function buildBank() {
   const bank = sound.bank, levels = (hs, takes, len, make) => hs.map(h => Array.from({ length: takes }, () => render(len, (d, sr) => make(d, sr, h))));
-  // Ball on ball: the hard, bright "clack" of two resin balls. Almost all of it is the instant of contact
-  // (a click) plus a quick high ring; harder hits ring brighter and a touch longer.
-  bank.clack = levels([0.1, 0.45, 0.8, 1], 4, 0.09, (d, sr, h) => {
-    const f = rnd(2300, 2800) + 700 * h;
-    hiss(d, sr, 'hp', 1800 + 1800 * h, 0.7, 0.0009 + 0.0006 * h, 1.1 + 0.6 * h);
-    ring(d, sr, [[f, 0.008 + 0.012 * h, 1], [f * rnd(1.42, 1.52), 0.006 + 0.007 * h, 0.5 + 0.4 * h],
-                 [f * rnd(2.05, 2.2), 0.004 + 0.004 * h, 0.15 + 0.45 * h], [f * rnd(2.8, 3.1), 0.003, 0.35 * h],
-                 [rnd(750, 950), 0.006, 0.3]]);
+  // Ball on ball: two solid resin balls touch for only about a quarter of a millisecond, and that one
+  // sharp push of air IS the clack. So it's built from a single short pulse (shorter = harder = brighter)
+  // with a dab of noise for texture, and almost no ringing tone: ringing is what made it sound glassy.
+  bank.clack = levels([0.1, 0.45, 0.8, 1], 4, 0.05, (d, sr, h) => {
+    pulse(d, sr, 0.00042 - 0.00016 * h + rnd(-0.00003, 0.00003), 1);
+    pulse(d, sr, 0.0011, 0.35, 0.0002);                                   // the weight behind it
+    hiss(d, sr, 'bp', 2400 + 1200 * h, 0.6, 0.0012, 0.45 + 0.25 * h);
+    ring(d, sr, [[rnd(1700, 2100), 0.0014, 0.3]]);                        // a very damped knock, not a ring
   });
-  // Cue tip on the white: the leather tip softens it to a rounder "tock", with a low knock from the cue itself
-  bank.strike = levels([0.1, 0.4, 0.7, 1], 3, 0.14, (d, sr, h) => {
-    hiss(d, sr, 'bp', 1100 + 1700 * h, 0.8, 0.0022 - 0.0008 * h, 1.2);
-    ring(d, sr, [[rnd(980, 1100) + 400 * h, 0.012 + 0.006 * h, 0.7], [rnd(1900, 2100) + 700 * h, 0.006, 0.15 + 0.4 * h],
-                 [rnd(200, 240), 0.03, 0.35, 0.3], [rnd(480, 560), 0.014, 0.25]]);
+  // Cue tip on the white: the leather tip stays on the ball about a millisecond, so it's a softer, lower "tock"
+  bank.strike = levels([0.1, 0.4, 0.7, 1], 3, 0.06, (d, sr, h) => {
+    pulse(d, sr, 0.0013 - 0.0005 * h + rnd(-0.0001, 0.0001), 1);
+    pulse(d, sr, 0.00045, 0.25 + 0.35 * h, 0.0003);                       // the ball itself clicking off the tip
+    hiss(d, sr, 'lp', 1600 + 1400 * h, 0.7, 0.002, 0.4);
+    ring(d, sr, [[rnd(320, 380), 0.004, 0.25]]);                         // a short knock up the cue
   });
-  // The break: the same, but a big crack on top
-  bank.break = levels([1], 3, 0.2, (d, sr) => {
-    hiss(d, sr, 'hp', 2200, 0.6, 0.0035, 1.4);
-    hiss(d, sr, 'bp', 2800, 0.8, 0.0016, 1.2);
-    ring(d, sr, [[rnd(1450, 1600), 0.02, 0.8], [rnd(2700, 2900), 0.01, 0.6], [rnd(3900, 4300), 0.006, 0.35],
-                 [rnd(190, 230), 0.045, 0.5, 0.4], [rnd(520, 600), 0.02, 0.3]]);
+  // The break: a full-blooded strike with a sharp crack on top
+  bank.break = levels([1], 3, 0.08, (d, sr) => {
+    pulse(d, sr, 0.0008 + rnd(-0.00005, 0.00005), 1);
+    pulse(d, sr, 0.00028, 0.8, 0.0002);
+    hiss(d, sr, 'hp', 2000, 0.6, 0.0025, 0.7);
+    ring(d, sr, [[rnd(320, 380), 0.005, 0.3]]);
   });
-  // Ball into a cushion: a dull rubber thump; harder hits also knock the wooden rail behind it
-  bank.cushion = levels([0.15, 0.55, 1], 3, 0.3, (d, sr, h) => {
-    hiss(d, sr, 'lp', 450 + 400 * h, 0.7, 0.008 + 0.006 * h, 0.7);
-    ring(d, sr, [[rnd(85, 105) + 35 * h, 0.045 + 0.03 * h, 1, 0.5], [rnd(170, 200), 0.025, 0.35, 0.3],
-                 [rnd(330, 400), 0.022, 0.45 * h], [rnd(780, 900), 0.01, 0.25 * h]]);
+  // Ball into a cushion: a dull, padded rubber thump; harder hits also knock the wooden rail behind it
+  bank.cushion = levels([0.15, 0.55, 1], 3, 0.12, (d, sr, h) => {
+    pulse(d, sr, 0.0045 - 0.0015 * h, 1);
+    hiss(d, sr, 'lp', 380 + 300 * h, 0.6, 0.012, 0.45);
+    pulse(d, sr, 0.0009, 0.35 * h, 0.0015);                               // the rail
+    ring(d, sr, [[rnd(110, 140), 0.012, 0.3]]);
   });
   // Ball into a pocket: a knock on the leather/wood as it drops, a second as it lands on the runway,
   // then the hollow rumble of rolling away inside the table towards the ball return
   bank.pocket = levels([0.3, 1], 3, 0.95, (d, sr, h) => {
     hiss(d, sr, 'lp', 900, 0.8, 0.008, 0.5);
-    ring(d, sr, [[rnd(170, 200), 0.04, 1, 0.4], [rnd(380, 450), 0.02, 0.5], [rnd(1100, 1300), 0.006, 0.25 * h]]);
+    pulse(d, sr, 0.0022, 1);
+    ring(d, sr, [[rnd(170, 200), 0.015, 0.5], [rnd(380, 450), 0.006, 0.3]]);
     const at = rnd(0.08, 0.11);
     hiss(d, sr, 'lp', 700, 0.8, 0.007, 0.4, at);
-    ring(d, sr, [[rnd(140, 165), 0.05, 0.65, 0.3, at], [rnd(320, 360), 0.02, 0.3, 0, at]]);
+    pulse(d, sr, 0.0028, 0.7, at);
+    ring(d, sr, [[rnd(140, 165), 0.015, 0.35, 0, at]]);
     // rolling away: low noise in a wooden channel, wobbling a little as the ball turns
     const i0 = Math.floor((at + 0.04) * sr), n = d.length - i0, x = new Float32Array(n), wob = rnd(11, 16);
     for (let i = 0; i < n; i++) {
@@ -1594,7 +1605,8 @@ function buildBank() {
   // Wooden knock: a ball reaching the end of the ball return, or dropping out of the chute into it
   bank.knock = levels([0.3, 1], 3, 0.12, (d, sr, h) => {
     hiss(d, sr, 'bp', 900, 0.9, 0.003, 0.6);
-    ring(d, sr, [[rnd(420, 520), 0.025, 1, 0.2], [rnd(1150, 1300), 0.01, 0.3 + 0.3 * h], [rnd(210, 240), 0.03, 0.4]]);
+    pulse(d, sr, 0.0011 - 0.0003 * h, 1);
+    ring(d, sr, [[rnd(420, 520), 0.008, 0.45], [rnd(210, 240), 0.01, 0.3]]);
   });
 }
 
