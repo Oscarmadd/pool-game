@@ -404,13 +404,22 @@ function updateUI() {
 const G = 9.81;            // gravity, m/s²
 const SLIDE_GRIP = 0.2;    // cloth friction while a ball skids (bigger = grabs the cloth sooner)
 const BALL_BOUNCE = 0.93;  // 1 = perfectly bouncy ball-on-ball hits
-const CUSHION_BOUNCE = 0.75;
-const CUSHION_SPIN = 0.5;  // how much forward spin survives a cushion hit (the cushion grips the top of the ball)
+// Throw: where two balls touch, their surfaces rub. Ball-on-ball friction is low and gets lower the
+// faster the surfaces slide past each other (measured values from Dr Dave Alciatore's throw research).
+const THROW_A = 0.00995, THROW_B = 0.108, THROW_C = 1.088;   // grip = A + B x e^(-C x sliding speed)
+// Cushions: the rubber nose touches the ball a little ABOVE its middle, so it grips the spin as well as
+// bouncing the ball back. Bounce gets weaker the harder the ball hits (the rubber can't spring back fully).
+const CUSHION_NOSE = 0.27;      // how far above the ball's centre the nose touches, as a fraction of its radius
+const CUSHION_BOUNCE = 0.88;    // bounce for a gentle hit (1 = perfectly bouncy)
+const CUSHION_SOFTEN = 0.06;    // bounce lost per m/s of speed into the cushion
+const CUSHION_MIN_BOUNCE = 0.62;
+const CUSHION_GRIP = 0.14;      // rubber-on-ball friction (bigger = spin and angle change more off the cushion)
+const CUSHION_ROLL_GRIP = 0.25;  // share of that grip acting up/down on top/back spin (the nose gives way)
 // Spin from hitting the cue ball off-centre
 const MAX_TIP = 0.5;       // furthest you can hit from the centre, as a fraction of the ball's radius (further = miscue)
 const SIDE_DECAY = 1.5;    // how quickly side spin wears off on the cloth
-const SIDE_GRIP = 0.35;    // how strongly side spin changes the angle off a cushion
 const SQUIRT = 0.05;       // how far side spin pushes the white off line (radians at full side)
+const CUE_ELEVATION = 0.07;// the cue's butt is raised ~4°, so side spin is tilted a little and the white swerves back
 const SUBSTEPS = 10;       // split each frame into small steps so fast balls don't pass through each other
 
 const COLOURS = { 1:'#f2c21b', 2:'#1f4fbf', 3:'#d2232a', 4:'#5b2a86', 5:'#f07c1e', 6:'#13804a', 7:'#7a1f1f', 8:'#111111' };
@@ -755,18 +764,31 @@ function step(h) {
       const dx = b.x - a.x, dz = b.z - a.z, d2 = dx * dx + dz * dz;
       const touch = a.r + b.r;
       if (d2 >= touch * touch || d2 === 0) continue;
-      const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;   // n = unit line from a's centre to b's centre
-      // Push them apart so they're just touching (stops them sticking together)
-      const overlap = (touch - d) / 2;
+      // Fast balls can sink into each other by several millimetres within one small step, which would
+      // put the line of centres in the wrong place and spoil the cut angle. So wind both balls back to the
+      // exact moment they touched (solve |gap + relative speed x time| = touch), bounce them there, then
+      // run them forward again for that same time with their new speeds.
+      const wx = b.vx - a.vx, wz = b.vz - a.vz, A = wx * wx + wz * wz, B = 2 * (dx * wx + dz * wz);
+      let back = 0;
+      if (A > 1e-9 && B < 0) {
+        const t = (-B - Math.sqrt(Math.max(0, B * B - 4 * A * (d2 - touch * touch)))) / (2 * A);   // negative = in the past
+        if (t < 0 && t > -2 * h) back = t;
+      }
+      if (back) { a.x += a.vx * back; a.z += a.vz * back; b.x += b.vx * back; b.z += b.vz * back; }
+      const ex = b.x - a.x, ez = b.z - a.z, d = Math.hypot(ex, ez), nx = ex / d, nz = ez / d;   // n = unit line from a's centre to b's centre
+      // Push them apart so they're just touching (stops resting balls sticking together)
+      const overlap = Math.max(0, (touch - d) / 2);
       a.x -= nx * overlap; a.z -= nz * overlap; b.x += nx * overlap; b.z += nz * overlap;
       // How fast are they closing along that line? If not closing, nothing to do.
       const closing = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
-      if (closing <= 0) continue;
+      if (closing <= 0) { if (back) { a.x -= a.vx * back; a.z -= a.vz * back; b.x -= b.vx * back; b.z -= b.vz * back; } continue; }
       // Impulse = the "kick" each ball gets along the line between them. A lighter ball gets
       // pushed more by the same kick (that's why a UK cue ball follows through after a hit).
       const kick = closing * (1 + BALL_BOUNCE) / (1 / a.m + 1 / b.m);
       sfxClick(closing, (a.x + b.x) / 2, (a.z + b.z) / 2);
       a.vx -= kick / a.m * nx; a.vz -= kick / a.m * nz; b.vx += kick / b.m * nx; b.vz += kick / b.m * nz;
+      throwBalls(a, b, nx, nz, kick);
+      if (back) { a.x -= a.vx * back; a.z -= a.vz * back; b.x -= b.vx * back; b.z -= b.vz * back; }   // catch up the time we wound back
       // Note the first ball the cue ball touches – rules need this
       if (shot && shot.firstHit === null && (a === cue || b === cue)) {
         shot.firstHit = (a === cue ? b : a).n;
@@ -791,20 +813,7 @@ function step(h) {
       b.x = cx + nx * b.r; b.z = cz + nz * b.r;        // push the ball back out so it's just touching
       const into = b.vx * nx + b.vz * nz;          // speed heading into the cushion
       if (into < 0) {
-        b.vx -= (1 + CUSHION_BOUNCE) * into * nx; b.vz -= (1 + CUSHION_BOUNCE) * into * nz;
-        // The ball's forward spin was carrying it into the cushion. The cushion grips the top of the
-        // ball and reverses some of that spin, so it comes off a little "dead" rather than skating away.
-        const spinIn = b.ux * nx + b.uz * nz;
-        if (spinIn < 0) { b.ux -= (1 + CUSHION_SPIN) * spinIn * nx; b.uz -= (1 + CUSHION_SPIN) * spinIn * nz; }
-        // Side spin: the spinning ball grips the cushion and gets pushed sideways along it.
-        // Right-hand side (side > 0) kicks the ball to the shooter's right, left-hand side to the left.
-        // The kick is limited by how hard the ball hit the cushion (friction needs pressure).
-        if (b.side) {
-          const kick = Math.sign(b.side) * Math.min(Math.abs(b.side) * SIDE_GRIP, 0.3 * (1 + CUSHION_BOUNCE) * -into);
-          b.vx += kick * nz; b.vz -= kick * nx;
-          b.ux += kick * nz; b.uz -= kick * nx;
-          b.side *= 0.6;   // the cushion uses up some of the spin
-        }
+        bounceOffCushion(b, nx, nz, into);
         hitCushion(into);
         sfxThud(-into, b.x, b.z);
       }
@@ -814,6 +823,82 @@ function step(h) {
       || Math.abs(b.x) > CA + 0.05 || Math.abs(b.z) > CB + 0.05;   // safety net: anything that escapes counts as potted
     if (dropped) potBall(b);
   }
+}
+
+// THROW: while two balls are pressed together, their surfaces rub, and friction drags the object ball a
+// little off the line between their centres (and the cue ball the opposite way, so nothing is lost).
+// Two things make the surfaces rub:
+//   - a cut: the white's movement across the line of centres (biggest on slow, stunned cut shots)
+//   - side spin: right-hand side throws the object ball LEFT, left-hand side throws it right
+// Top/back spin rubs the surfaces up/down instead. That sideways rubbing doesn't push the object ball
+// off line, but it makes the surfaces slide faster, so the grip is lower – a rolling white throws less.
+// Friction can only stop the rubbing, never reverse it (the "gearing" limit).
+function throwBalls(a, b, nx, nz, kick) {
+  const tx = nz, tz = -nx;                              // sideways along the contact (up × n)
+  const inv = 1 / a.m + 1 / b.m;
+  // how fast a's surface slides past b's at the contact point: sideways and up/down
+  const slipH = (a.vx - b.vx) * tx + (a.vz - b.vz) * tz + a.side + b.side;
+  const slipV = -((a.ux + b.ux) * nx + (a.uz + b.uz) * nz);
+  const slip = Math.hypot(slipH, slipV);
+  if (slip < 1e-6) return;
+  const fric = (THROW_A + THROW_B * Math.exp(-THROW_C * slip)) * kick;   // friction impulse available
+  let jH = fric * slipH / slip, jV = fric * slipV / slip;
+  // gearing limit: a solid ball's surface responds 2.5x more to spin than to movement, hence 3.5 sideways
+  // (movement + spin) and 2.5 up/down (spin only – the table soaks up any up/down push)
+  const maxH = Math.abs(slipH) / (3.5 * inv), maxV = Math.abs(slipV) / (2.5 * inv);
+  if (Math.abs(jH) > maxH) jH = Math.sign(jH) * maxH;
+  if (Math.abs(jV) > maxV) jV = Math.sign(jV) * maxV;
+  // movement: a is dragged back against the slide, b is dragged along with it
+  a.vx -= jH / a.m * tx; a.vz -= jH / a.m * tz;
+  b.vx += jH / b.m * tx; b.vz += jH / b.m * tz;
+  // spin: the rubbing also slows both balls' side spin, and swaps a little top/back spin between them
+  a.side -= 2.5 * jH / a.m; b.side -= 2.5 * jH / b.m;
+  a.ux += 2.5 * jV / a.m * nx; a.uz += 2.5 * jV / a.m * nz;
+  b.ux += 2.5 * jV / b.m * nx; b.uz += 2.5 * jV / b.m * nz;
+}
+
+// CUSHION HIT, done as a proper spinning-ball bounce (after Han 2005 and Mathavan et al. 2010).
+// The rubber nose touches the ball a little ABOVE its middle (regulation nose height is about 63% of the
+// ball's height). That matters because:
+//   - the rubber pushes back flat across the table, but above the centre, so the push also turns the
+//     ball's spin round: a rolling ball comes off still mostly rolling, with a little check on it,
+//   - friction at the rubber grips the ball's spin: side spin kicks it along the cushion (and is used up
+//     doing it), and a ball skating in at an angle with no spin has its sideways speed dragged down,
+//   - the bounce is weaker the harder the ball hits (the rubber can't spring back fully).
+// Whatever spin is left over then bends the ball's path on the cloth afterwards, like a real table.
+// n = unit vector pointing out of the cushion towards the ball, into = speed along n (negative = going in).
+function bounceOffCushion(b, nx, nz, into) {
+  const R = b.r, m = b.m, I = 0.4 * m * R * R;
+  const sinT = CUSHION_NOSE, cosT = Math.sqrt(1 - sinT * sinT);
+  // Work in 3D for the moment (x, y = up, z). Spin as an angular velocity:
+  //   rolling speed u -> spin about a flat axis, side -> spin about the up axis
+  let wx = b.uz / R, wy = b.side / R, wz = -b.ux / R;
+  // where the rubber touches, measured from the ball's centre (back towards the cushion, and up a bit)
+  const rx = -nx * cosT * R, ry = sinT * R, rz = -nz * cosT * R;
+  const applyAt = (Px, Py, Pz) => {   // an impulse at the touch point: moves the ball and turns it
+    b.vx += Px / m; b.vz += Pz / m;   // (any up/down part just goes into the table)
+    wx += (ry * Pz - rz * Py) / I; wy += (rz * Px - rx * Pz) / I; wz += (rx * Py - ry * Px) / I;
+  };
+  // 1. The bounce: straight back out of the cushion, harder hits lose more
+  const e = Math.max(CUSHION_MIN_BOUNCE, CUSHION_BOUNCE - CUSHION_SOFTEN * -into);
+  const Pn = (1 + e) * m * -into;
+  applyAt(Pn * nx, 0, Pn * nz);
+  // 2. Friction: how fast is the ball's surface sliding across the rubber (along the cushion and up/down)?
+  const cvx = b.vx + (wy * rz - wz * ry), cvy = (wz * rx - wx * rz), cvz = b.vz + (wx * ry - wy * rx);
+  const along = cvx * nz - cvz * nx;        // sliding along the cushion (direction (nz, -nx))
+  const slip = Math.hypot(along, cvy);
+  if (slip > 1e-9) {
+    const F = CUSHION_GRIP * Pn;            // the most friction the rubber can give
+    // up/down, the soft rubber nose squashes and rolls with the ball, so it grips much less that way
+    let fa = F * along / slip, fy = F * CUSHION_ROLL_GRIP * cvy / slip;
+    // never more than it takes to stop the sliding (a solid ball's surface: 3.5/m along, 2.5cos²/m up/down)
+    const maxA = Math.abs(along) * m / 3.5, maxY = Math.abs(cvy) * m / (2.5 * cosT * cosT);
+    if (Math.abs(fa) > maxA) fa = Math.sign(fa) * maxA;
+    if (Math.abs(fy) > maxY) fy = Math.sign(fy) * maxY;
+    applyAt(-fa * nz, -fy, fa * nx);
+  }
+  // back to the 2D "rolling speed" and side spin the rest of the physics uses
+  b.ux = -wz * R; b.uz = wx * R; b.side = wy * R;
 }
 
 function hitCushion(into) {
@@ -858,6 +943,11 @@ function shoot() {
   //   h < 0    -> back spin, pulls back after contact (screw)
   cue.ux = dx * speed * 2.5 * tipY; cue.uz = dz * speed * 2.5 * tipY;
   cue.side = speed * 2.5 * tipX;   // right of centre = positive = kicks right off cushions
+  // Swerve: the cue is raised a little at the butt, so it strikes slightly downwards. With side, that tilts
+  // the spin so part of it rolls the white sideways; the cloth turns that into a gentle curve back the
+  // way of the side (right side: squirts left, then drifts right) until the ball settles into a roll.
+  const sw = cue.side * Math.tan(CUE_ELEVATION);
+  cue.ux += -dz * sw; cue.uz += dx * sw;
   // Everything the rules need to know about this shot gets recorded in here as it plays out
   shot = { number: ++shotCount, power: Math.round(power * 100), firstHit: null, potted: [], cushions: 0,
            cushionAfterHit: false, cuePotted: false, isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set() };
