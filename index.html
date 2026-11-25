@@ -67,6 +67,27 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#6fae7c,var(--brass),#d2232a)}
 #report{font-size:15px;color:var(--dim)}
 #report strong{color:var(--ink);font-weight:500}
+/* Online play: lobby / connection card */
+#netCard{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,8,7,.6);z-index:5}
+#netCard[hidden]{display:none}
+#netCard .card{display:flex;flex-direction:column;gap:12px;align-items:stretch;max-width:min(400px,92%)}
+#netCard h2{margin:0}
+#netCard p{margin:0}
+#netCard .row{display:flex;gap:8px}
+#netCard .row>*{flex:1}
+#netCard input{font:500 17px Barlow,sans-serif;color:var(--ink);background:#0f0d0b;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 12px;width:100%}
+#netCard input:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+#netCard input.code{font:700 22px "Barlow Condensed",sans-serif;letter-spacing:.18em;text-transform:uppercase;text-align:center}
+#netCard .big{font:700 48px/1 "Barlow Condensed",sans-serif;letter-spacing:.16em;color:var(--brass)}
+#netCard .or{font-size:13px;color:var(--dim)}
+#netCard .err{color:#ef8a6d;font-size:15px}
+#netCard .err:empty{display:none}
+#netCard .small{font-size:13px;color:var(--dim)}
+#netCard .main{border-color:var(--brass);color:var(--brass)}
+#netCard [hidden]{display:none}
+#onlineBtn[aria-pressed=true]::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#6fae7c;margin-right:7px;vertical-align:middle}
+#onlineBtn.lost::before{background:#ef8a6d}
+.pl .you{color:var(--brass);font:500 12px Barlow,sans-serif}
 @media(max-width:1100px){h1 span{display:none}}
 @media(max-width:940px){.sel span{display:none}}
 @media(max-width:600px){h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
@@ -81,6 +102,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <label class="sel"><span>Table</span><select id="tableSel" aria-label="Table size"></select></label>
   <button id="viewBtn" aria-pressed="false" title="Look down on the whole table without shooting (T)">Overview</button>
   <button id="soundBtn" aria-pressed="true">Sound</button>
+  <button id="onlineBtn" aria-pressed="false" title="Play a friend over the internet">Online</button>
   <button id="rackBtn">Re-rack</button>
 </header>
 <div id="stage">
@@ -89,6 +111,26 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <div id="spinBall" role="slider" tabindex="0" aria-label="Where to hit the cue ball (W A S D to move, X to centre)"><i id="spinDot"></i></div>
     <span id="spinLabel">Centre</span>
   </div>
+  <div id="netCard" hidden><div class="card" role="dialog" aria-labelledby="netTitle">
+    <h2 id="netTitle">Play online</h2>
+    <div id="netMenu">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <label class="small" for="netName">Your name</label>
+        <input id="netName" maxlength="16" autocomplete="nickname" placeholder="Player">
+        <button id="hostBtn" class="main">Host a game</button>
+        <span class="or">or join a friend's game with their code</span>
+        <div class="row"><input id="joinCode" class="code" maxlength="5" autocomplete="off" spellcheck="false" placeholder="CODE" aria-label="Game code"><button id="joinBtn">Join</button></div>
+      </div>
+    </div>
+    <p id="netText"></p>
+    <div id="netCodeBox" hidden><div class="big" id="netCode"></div></div>
+    <p class="err" id="netErr"></p>
+    <button id="copyBtn" hidden>Copy invite link</button>
+    <button id="localBtn" hidden>Play on locally</button>
+    <button id="leaveBtn" hidden>Leave online game</button>
+    <button id="netClose">Cancel</button>
+    <p class="small" id="netNote">Uses the free PeerJS service to find each other, then the game runs directly between your two browsers. Nothing is stored anywhere.</p>
+  </div></div>
   <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><button id="nextBtn">Next frame</button></div></div>
 </div>
 <footer>
@@ -314,6 +356,14 @@ const game = {
   turn: 0, breaker: 0, isBreak: true, freeShot: false, ballInHand: null, over: false,
 };
 
+// Online play (see section 9). me = which player this browser is (0 = host, 1 = guest).
+// When online, only the player whose turn it is can aim, move the white or shoot.
+const net = { on: false, host: false, connected: false, me: 0, seq: 0, watch: null };
+const myTurn = () => !net.on || (net.connected && game.turn === net.me);
+// Where the camera should be for the next shot: overhead if the white has to be placed, or if it's
+// your friend's turn online (you watch from above while they play); otherwise down on the shot.
+const nextView = () => (net.on && game.turn !== net.me) || (game.ballInHand && game.ballInHand !== 'baulk-optional') ? 'top' : 'cue';
+
 function newFrame(breaker) {
   game.breaker = breaker; game.turn = breaker;
   game.isBreak = true; game.freeShot = false; game.over = false;
@@ -361,9 +411,9 @@ function applyVerdict(v) {
     if (v.result === 'switch') game.turn = 1 - game.turn;
     setReport(v.msg);
   }
-  // Next view: overhead only if the white has to be placed. If moving it is optional (it can be played
-  // from where it lies) stay down on the shot; V still pops up to move it.
-  pendingView = game.ballInHand && game.ballInHand !== 'baulk-optional' ? 'top' : 'cue';
+  // Next view: overhead only if the white has to be placed (or it's your friend's turn online). If moving
+  // it is optional (it can be played from where it lies) stay down on the shot; V still pops up to move it.
+  pendingView = nextView();
   updateUI();
 }
 
@@ -377,7 +427,8 @@ function updateUI() {
       const g = p.group;
       const sw = g ? `style="background:${g === 'A' ? RED : YELLOW}"` : '';
       const left = g ? (ballsLeft(g) ? ballsLeft(g) + ' left' : 'on the black') : 'open';
-      return `<div class="pl${i === game.turn && !game.over ? ' on' : ''}"><i ${sw}></i>${p.name} <small>${left}</small> <span class="fr">${p.frames}</span></div>`;
+      const you = net.on && i === net.me ? ' <span class="you">you</span>' : '';
+      return `<div class="pl${i === game.turn && !game.over ? ' on' : ''}"><i ${sw}></i>${p.name}${you} <small>${left}</small> <span class="fr">${p.frames}</span></div>`;
     }).join('');
   }
   let t;
@@ -391,12 +442,19 @@ function updateUI() {
   document.getElementById('turnText').innerHTML = t;
   const h = document.getElementById('hint');
   const v = typeof view === 'undefined' ? 'top' : view;
-  document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over);
+  document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && myTurn());
   h.hidden = state !== 'aim' || game.over;
   const vb = document.getElementById('viewBtn'), look = typeof looking !== 'undefined' && looking;
   vb.setAttribute('aria-pressed', look);
-  vb.disabled = state !== 'aim' || game.over || (v === 'top' && !look);
-  if (look) h.textContent = 'Just looking, no shooting · press T or Overview to get back down on your shot';
+  vb.disabled = state !== 'aim' || game.over || (v === 'top' && !look) || !myTurn();
+  // Online: only the host can change the table, the rules or re-rack (it resets the frame for both of you)
+  const hostOnly = net.on && (!net.host || state === 'moving');
+  for (const id of ['rackBtn', 'rulesSel', 'tableSel']) document.getElementById(id).disabled = hostOnly;
+  if (net.on && !myTurn()) {
+    const them = game.players[game.turn].name;
+    h.hidden = game.over || !net.connected;
+    h.textContent = state === 'aim' ? 'Waiting for ' + them + ' to play' : 'Watching ' + them + "'s shot";
+  } else if (look) h.textContent = 'Just looking, no shooting · press T or Overview to get back down on your shot';
   else if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D)' + (game.ballInHand ? ' · V moves the white' : '');
   else if (game.ballInHand) h.textContent = game.ballInHand === 'baulk-optional'
       ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
@@ -934,13 +992,25 @@ const anyMoving = () => balls.some(b => !b.potted && Math.hypot(b.vx, b.vz) + Ma
 // 5. SHOOTING AND THE END-OF-SHOT REPORT
 // ================================================================
 function shoot() {
-  const speed = 0.25 + Math.pow(power, 1.3) * MAX_SPEED;   // curve gives finer control on soft shots
-  sfxStrike(power, cue.x, cue.z);
-  // Where the tip hits the white, as a fraction of its radius (spin.x = right of centre, spin.y = above centre)
-  const tipX = spin.x * MAX_TIP, tipY = spin.y * MAX_TIP;
+  // Everything the shot depends on. Online, this is sent to the other player so their table plays it too.
+  const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y };
+  netSendShot(p);
+  strike(p);
+  frozen = true; startChase();
+  setSpin(0, 0);   // back to a centre-ball hit for the next shot
+  hint.hidden = true; hint.dataset.seen = '1';
+  updateUI();
+}
+
+// Hit the white: p = aim direction (ax, az), power 0..1, and where the tip hits (sx, sy, -1..1)
+function strike(p) {
+  const speed = 0.25 + Math.pow(p.power, 1.3) * MAX_SPEED;   // curve gives finer control on soft shots
+  sfxStrike(p.power, cue.x, cue.z);
+  // Where the tip hits the white, as a fraction of its radius (sx = right of centre, sy = above centre)
+  const tipX = p.sx * MAX_TIP, tipY = p.sy * MAX_TIP;
   // Side spin squirts the white slightly the opposite way to the side you hit
   const sq = -tipX * SQUIRT / MAX_TIP, c = Math.cos(sq), sn = Math.sin(sq);
-  const dx = aim.x * c - aim.z * sn, dz = aim.x * sn + aim.z * c;
+  const dx = p.ax * c - p.az * sn, dz = p.ax * sn + p.az * c;
   cue.vx = dx * speed; cue.vz = dz * speed;
   // A solid ball hit at height h above centre spins at 2.5 x speed x h. As a "rolling speed" that's:
   //   h = 0    -> no spin, the white skids then starts rolling (stun)
@@ -955,22 +1025,21 @@ function shoot() {
   const sw = cue.side * Math.tan(CUE_ELEVATION);
   cue.ux += -dz * sw; cue.uz += dx * sw;
   // Everything the rules need to know about this shot gets recorded in here as it plays out
-  shot = { number: ++shotCount, power: Math.round(power * 100), firstHit: null, potted: [], cushions: 0,
+  shot = { number: ++shotCount, power: Math.round(p.power * 100), firstHit: null, potted: [], cushions: 0,
            cushionAfterHit: false, cuePotted: false, isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set() };
   state = 'moving'; power = 0; updatePower();
+  physTime = 0;
   game.ballInHand = null;
-  frozen = true; startChase();
-  setSpin(0, 0);   // back to a centre-ball hit for the next shot
-  hint.hidden = true; hint.dataset.seen = '1';
-  updateUI();
 }
 
 function finishShot() {
   for (const b of balls) { b.vx = b.vz = b.ux = b.uz = b.side = 0; }
   state = 'aim';
   shot.crossed = shot.crossed.size;
+  const before = net.on ? ballState() : null;   // where the balls stopped, before the rules move the white
   const v = RULE.judge(shot, game);   // the rules engine decides what happens next
   applyVerdict(v);
+  netSendResult(before, v);           // online: the shooter's table is the one that counts
 }
 
 // Put the cue ball back after it's gone in-off: in baulk if the rules use one, otherwise on the head spot.
@@ -987,7 +1056,12 @@ function respawnCue() {
   cue.mesh.position.set(cue.x, cue.r, cue.z);
 }
 
-function setReport(html, isFoul) { const r = document.getElementById('report'); r.innerHTML = html; r.classList.toggle('foul', !!isFoul); }
+// Only <strong> is allowed in the report (messages can come from the other player's browser online)
+function setReport(html, isFoul) {
+  const r = document.getElementById('report');
+  r.innerHTML = String(html).replace(/<(?!\/?strong>)[^>]*>?/g, '');
+  r.classList.toggle('foul', !!isFoul);
+}
 
 // ================================================================
 // 6. AIM GUIDE AND CUE STICK
@@ -1076,7 +1150,7 @@ function autoAim() {
 }
 
 el.addEventListener('pointermove', e => {
-  if (state !== 'aim' || game.over) return;
+  if (state !== 'aim' || game.over || !myTurn()) return;
   if (gesture) {
     const dx = e.clientX - gesture.x0, dy = e.clientY - gesture.y0;
     if (!gesture.mode && Math.hypot(dx, dy) > 6) gesture.mode = dy > Math.abs(dx) ? 'power' : 'aim';
@@ -1098,7 +1172,7 @@ el.addEventListener('pointermove', e => {
 
 el.addEventListener('pointerdown', () => audioInit(), true);
 el.addEventListener('pointerdown', e => {
-  if (state !== 'aim' || game.over || pendingView || looking) return;
+  if (state !== 'aim' || game.over || pendingView || looking || !myTurn()) return;
   if (view === 'top') {
     const p = tablePoint(e);
     // Ball in hand: grabbing the white moves it
@@ -1184,8 +1258,8 @@ function placeCue(p) {
 
 addEventListener('keydown', () => audioInit(), true);
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('select')) return;
-  if (state !== 'aim' || game.over) return;
+  if (e.target.closest && e.target.closest('select, input, #netCard')) return;
+  if (state !== 'aim' || game.over || !myTurn()) return;
   // T (or the Overview button) toggles the "just looking" top view; Esc also leaves it
   if (e.key === 't' || e.key === 'T' || (looking && e.key === 'Escape')) { setLook(!looking); return; }
   if (looking) return;   // no aiming, spin or ball in hand while just looking
@@ -1338,7 +1412,7 @@ soundBtn.addEventListener('click', () => {
 
 function updatePower() { document.getElementById('powerFill').style.width = (power * 100) + '%'; }
 
-document.getElementById('rackBtn').addEventListener('click', () => newFrame(game.breaker));
+document.getElementById('rackBtn').addEventListener('click', () => { newFrame(game.breaker); netHostReset(); });
 
 // ================================================================
 // 8. CAMERA FIT, DRAWING AND THE MAIN LOOP
@@ -1563,15 +1637,29 @@ function updateFalling(dt) {
   falling = falling.filter(f => f.t < 1);
 }
 
+// Physics runs in fixed small steps (the same on every computer), so a shot played from the same
+// start plays out the same way – that's what lets an online opponent watch your shot on their table.
+const PHYS_H = 1 / (60 * SUBSTEPS);
+let physTime = 0;
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
-  if (state === 'moving') {
-    for (let i = 0; i < SUBSTEPS; i++) step(dt / SUBSTEPS);
+  if (state === 'moving' && !(net.watch && net.watch.done)) {
+    physTime += dt;
+    let stopped = false;
+    for (let i = 0; physTime >= PHYS_H && i < 40; i++) {
+      physTime -= PHYS_H;
+      step(PHYS_H);
+      if (!anyMoving()) { stopped = true; break; }
+    }
     syncMeshes(dt);
-    if (!anyMoving()) { finishShot(); syncMeshes(); }
+    if (stopped) {
+      if (net.watch) net.watch.done = true;   // watching a friend's shot: wait for their result
+      else { finishShot(); syncMeshes(); }
+    }
   }
+  netTick(now);
   updateFalling(dt);
   updateAimVisuals();
   updateCamera(dt);
@@ -1580,18 +1668,419 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// ================================================================
+// 9. ONLINE PLAY (peer to peer over WebRTC, using PeerJS)
+// ================================================================
+// One player hosts and gets a short code; the other joins with it. PeerJS's free public "broker" only
+// introduces the two browsers; after that every message goes directly between them.
+// Who decides what:
+//   - The player whose turn it is runs the shot on their own table. When they strike, they send the shot
+//     (aim, power, spin, and where every ball is) so the other table plays the same shot as it happens.
+//   - When the balls stop, the shooter's rules engine decides what happens and sends the result plus where
+//     every ball really ended up. The watcher snaps to that, so the two tables can never drift apart.
+//   - The host decides the table, the rules and when a new frame starts.
+// net.seq counts those decisions, so after a dropped connection the two sides can tell who is up to date.
+const PEER_PREFIX = 'oscarmadd-pool-';
+const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+const netEl = id => document.getElementById(id);
+const cleanName = (s, fallback) => String(s || '').replace(/[<>&"'`]/g, '').trim().slice(0, 16) || fallback;
+Object.assign(net, { peer: null, conn: null, code: '', started: false, lastHeard: 0, lastPing: 0,
+                     lastAim: 0, aimKey: '', retry: null, friend: '' });
+
+function loadPeerJS() {
+  if (window.Peer) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = PEERJS_URL; s.onload = res; s.onerror = () => rej(new Error('script'));
+    document.head.append(s);
+  });
+}
+// ?peerserver=host:port points at your own PeerJS server instead of the public one (used for testing)
+function peerOptions() {
+  const o = { debug: 0 };
+  const ps = new URLSearchParams(location.search).get('peerserver');
+  if (ps) { const [host, port] = ps.split(':'); Object.assign(o, { host, port: +port || 9000, path: '/', secure: false }); }
+  return o;
+}
+// 5-letter codes with no look-alike letters (no O/0, I/1)
+function makeCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = ''; for (let i = 0; i < 5; i++) c += A[Math.floor(Math.random() * A.length)];
+  return c;
+}
+const inviteLink = () => location.origin + location.pathname + '?join=' + net.code;
+
+// ---- What gets sent ----
+const ballState = () => balls.map(b => [b.n, b.x, b.z, b.potted ? 1 : 0]);
+function fullState() {
+  const over = game.over ? { title: netEl('overTitle').textContent, why: netEl('overWhy').textContent, score: netEl('overScore').textContent } : null;
+  const rep = netEl('report');
+  return { t: 'sync', seq: net.seq, rules: rulesSel.value, table: tableKey, shotCount, balls: ballState(),
+           game: { turn: game.turn, breaker: game.breaker, isBreak: game.isBreak, freeShot: game.freeShot,
+                   ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })) },
+           over, report: rep.innerHTML, foul: rep.classList.contains('foul') };
+}
+function netSend(msg) {
+  if (!net.on || !net.connected || !net.conn || !net.conn.open) return;
+  try { net.conn.send(msg); } catch (e) {}
+}
+function netSendShot(p) {
+  if (!net.on) return;
+  netSend({ t: 'shot', base: net.seq, p, balls: ballState() });
+}
+function netSendResult(before, v) {
+  if (!net.on) return;
+  const base = net.seq;
+  net.seq++;
+  netSend({ t: 'result', base, before, v, sync: fullState() });
+  // They (re)joined while this shot was running: they missed its start, so send them the whole table
+  if (net.syncAfterShot) { net.syncAfterShot = false; netSend(fullState()); }
+}
+// The host changed the table/rules, re-racked or started a new frame: send everyone the new table
+function netHostReset() {
+  if (!net.on || !net.host) return;
+  net.seq++;
+  netSend(fullState());
+  updateUI();
+}
+
+// ---- Applying what arrives ----
+function applyBalls(list) {
+  for (const [n, x, z, p] of list) {
+    const b = balls.find(q => q.n === n);
+    if (!b) continue;
+    b.vx = b.vz = b.ux = b.uz = b.side = 0;
+    if (p) {
+      if (!b.potted) { b.potted = true; b.mesh.visible = false; }
+    } else {
+      if (b.potted) {   // our copy had it potted but it wasn't: bring it back
+        b.potted = false;
+        falling = falling.filter(f => f.b !== b);
+        b.mesh.visible = true; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1);
+      }
+      b.x = x; b.z = z;
+    }
+  }
+  syncMeshes();
+}
+function applySync(s) {
+  // A different table or rules: rebuild first (the ball colours depend on the rules)
+  if (s.rules !== rulesSel.value || s.table !== tableKey) {
+    RULE = RULESETS[s.rules]; rulesSel.value = s.rules;
+    tableKey = s.table; tableSel.value = s.table;
+    applySpec(s.table); buildTable(); rack(); fitCamera();
+  }
+  net.watch = null;
+  state = 'aim'; gesture = null; placing = false; power = 0; updatePower();
+  chasing = false; frozen = false; looking = false;
+  applyBalls(s.balls);
+  shotCount = s.shotCount;
+  const g = s.game;
+  Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, ballInHand: g.ballInHand, over: g.over });
+  game.players = g.players.map((p, i) => ({ name: cleanName(p.name, 'Player ' + (i + 1)), group: p.group, frames: p.frames | 0 }));
+  net.seq = s.seq;
+  if (s.over) {
+    netEl('overTitle').textContent = s.over.title; netEl('overWhy').textContent = s.over.why; netEl('overScore').textContent = s.over.score;
+  }
+  netEl('over').hidden = !g.over;
+  if (s.report != null) setReport(s.report, s.foul);
+  pendingView = game.over ? 'top' : nextView();
+  updateUI();
+}
+
+function onData(m) {
+  net.lastHeard = performance.now();
+  if (!m || typeof m !== 'object') return;
+  try {
+    switch (m.t) {
+      case 'ping': break;
+      case 'hello': {   // the guest says who they are (host only)
+        if (!net.host) break;
+        net.friend = cleanName(m.name, 'Player 2');
+        if (!net.started) {
+          // First time in: fresh match, host breaks
+          net.started = true;
+          game.players[0].name = cleanName(netEl('netName').value, 'Player 1');
+          game.players[1].name = net.friend;
+          for (const p of game.players) p.frames = 0;
+          newFrame(0);
+          netHostReset();
+        } else if (m.seq < 0 && net.watch) {
+          // They reloaded in the middle of their own shot, so it's gone from their side. The copy we're
+          // watching becomes the real one: it's judged here and the whole table is sent once it stops.
+          net.watch = null; net.syncAfterShot = true;
+        } else if (m.seq > net.seq || net.watch) {
+          netSend({ t: 'wantsync' });   // they're ahead (their last shot never reached us): take theirs
+        } else if (state === 'moving' && !net.watch) {
+          net.syncAfterShot = true;      // our shot is still running; its result will bring them up to date
+        } else {
+          game.players[1].name = net.friend;
+          netSend(fullState());
+        }
+        showConnected();
+        break;
+      }
+      case 'wantsync':   // if our shot is still running, its result will carry the table
+        if (state === 'moving' && !net.watch) net.syncAfterShot = true;
+        else netSend(fullState());
+        break;
+      case 'sync': applySync(m); break;
+      case 'aim':    // the other player lining up: move their cue (and the white, with ball in hand)
+        if (myTurn() || state !== 'aim') break;
+        aim = { x: m.ax, z: m.az }; power = m.power; updatePower(); setSpin(m.sx, m.sy);
+        if (game.ballInHand && !cue.potted) { cue.x = m.cx; cue.z = m.cz; cue.mesh.position.set(cue.x, cue.r, cue.z); }
+        break;
+      case 'shot':   // they've hit it: play the same shot on our table
+        if (m.base !== net.seq || myTurn()) break;
+        applyBalls(m.balls);
+        aim = { x: m.p.ax, z: m.p.az };
+        chasing = false; frozen = false;
+        strike(m.p);
+        setSpin(0, 0);
+        net.watch = { done: false, result: null, at: 0 };
+        updateUI();
+        break;
+      case 'result': // their shot has finished: snap to where their balls stopped and apply their rules decision
+        if (m.base !== net.seq) break;
+        if (net.watch) { net.watch.result = m; net.watch.at = performance.now(); }
+        else applyResult(m);
+        break;
+      case 'next':   // the guest pressed Next frame
+        if (net.host && game.over) { newFrame(1 - game.breaker); netHostReset(); }
+        break;
+      case 'bye': dropped(true); break;
+    }
+  } catch (e) { console.error('online message', m.t, e); }
+}
+function applyResult(m) {
+  net.watch = null;
+  for (const b of balls) { b.vx = b.vz = b.ux = b.uz = b.side = 0; }
+  state = 'aim';
+  if (shot && shot.crossed instanceof Set) shot.crossed = shot.crossed.size;
+  applyBalls(m.before);
+  applyVerdict(m.v);     // same messages, fouls and frame-over card as the shooter saw
+  applySync(m.sync);     // then take their exact table and score
+}
+
+// Called every frame: send our aim while it's our turn, keep the connection alive, finish watched shots
+function netTick(now) {
+  if (!net.on) return;
+  const w = net.watch;
+  // Their result normally arrives as our copy of the shot finishes. If ours is still rolling well
+  // after theirs stopped, stop waiting and jump to their result.
+  if (w && w.result && (w.done || now - w.at > 2500)) applyResult(w.result);
+  if (!net.connected) return;
+  if (now - net.lastPing > 2000) { net.lastPing = now; netSend({ t: 'ping' }); }
+  if (now - net.lastHeard > 9000) { try { net.conn.close(); } catch (e) {} dropped(false); return; }
+  if (myTurn() && state === 'aim' && !game.over && now - net.lastAim > 66) {
+    net.lastAim = now;
+    const m = { t: 'aim', ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y, cx: cue.x, cz: cue.z };
+    const key = [m.ax, m.az, m.power, m.sx, m.sy, m.cx, m.cz].map(v => v.toFixed(4)).join();
+    if (key !== net.aimKey) { net.aimKey = key; netSend(m); }
+  }
+}
+
+// ---- Connecting ----
+function attach(conn) {
+  conn.on('open', () => {
+    if (net.conn && net.conn !== conn) { try { net.conn.close(); } catch (e) {} }
+    net.conn = conn; net.connected = true; net.lastHeard = performance.now();
+    clearTimeout(net.retry);
+    if (!net.host) {
+      netSend({ t: 'hello', name: cleanName(netEl('netName').value, 'Player 2'), seq: net.started ? net.seq : -1 });
+      net.started = true;
+      showConnected();
+    }
+    updateUI();
+  });
+  conn.on('data', onData);
+  conn.on('close', () => { if (net.conn === conn) dropped(false); });
+  conn.on('error', () => { if (net.conn === conn) dropped(false); });
+}
+
+async function hostGame() {
+  netError('');
+  savedName();
+  showCard('Starting…', 'Getting a game code…', []);
+  try { await loadPeerJS(); } catch (e) { return netFail("Couldn't load the online play library. Check your internet connection."); }
+  net.code = makeCode();
+  const peer = net.peer = new Peer(PEER_PREFIX + net.code, peerOptions());
+  peer.on('open', () => {
+    if (net.on) return;   // reconnected to the broker after a blip
+    Object.assign(net, { on: true, host: true, me: 0, connected: false, started: false, seq: 0 });
+    showWaiting();
+    updateUI();
+  });
+  peer.on('connection', conn => {
+    // One friend at a time: turn away a second person while the first is still here
+    if (net.connected && net.conn && net.conn.open) { conn.on('open', () => setTimeout(() => conn.close(), 300)); return; }
+    attach(conn);
+  });
+  peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id' && !net.on) { peer.destroy(); hostGame(); return; }   // code taken: pick another
+    if (!net.on) netFail(err.type === 'browser-incompatible' ? "This browser can't do online play." : "Couldn't reach the online service. Try again in a moment.");
+  });
+}
+
+async function joinGame(code) {
+  code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 5) return netError('Game codes are 5 letters and numbers.');
+  netError('');
+  savedName();
+  showCard('Joining…', 'Looking for game ' + code + '…', []);
+  try { await loadPeerJS(); } catch (e) { return netFail("Couldn't load the online play library. Check your internet connection."); }
+  net.code = code;
+  const peer = net.peer = new Peer(peerOptions());
+  const connect = () => attach(peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' }));
+  peer.on('open', () => {
+    if (net.connected) return;   // just a blip with the broker; our game connection is fine
+    if (!net.on) Object.assign(net, { on: true, host: false, me: 1, connected: false, started: false, seq: 0 });
+    connect();
+  });
+  peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+  peer.on('error', err => {
+    if (net.started) { scheduleRetry(); return; }   // mid-game: keep trying to get back in
+    if (err.type === 'peer-unavailable') netFail('No game found with code ' + code + '. Check the code, and that your friend still has the game open.');
+    else netFail("Couldn't reach the online service. Try again in a moment.");
+  });
+  // If nothing happens for a while (e.g. a firewall blocks the direct connection), say so
+  setTimeout(() => { if (net.peer === peer && !net.started) netFail("Couldn't connect to your friend. One of your networks may be blocking direct connections."); }, 20000);
+}
+function scheduleRetry() {
+  clearTimeout(net.retry);
+  net.retry = setTimeout(() => {
+    if (!net.on || net.connected || net.host || !net.peer || net.peer.destroyed) return;
+    if (net.peer.disconnected) net.peer.reconnect();
+    else attach(net.peer.connect(PEER_PREFIX + net.code, { reliable: true, serialization: 'json' }));
+    scheduleRetry();
+  }, 3000);
+}
+
+// The connection dropped (or the other player left)
+function dropped(left) {
+  if (!net.on || (!net.connected && !left)) return;
+  net.connected = false;
+  const who = game.players[1 - net.me].name;
+  if (net.host) {
+    showCard(left ? who + ' left' : 'Connection lost',
+      'Waiting for ' + who + ' to come back. They can open the invite link again or rejoin with this code.',
+      ['copyBtn', 'localBtn', 'leaveBtn'], true);
+  } else if (left) {
+    showCard(who + ' ended the game', 'You can carry on here, playing both sides.', ['localBtn']);
+  } else {
+    showCard('Connection lost', 'Trying to reconnect to ' + who + '…', ['localBtn', 'leaveBtn']);
+    scheduleRetry();
+  }
+  updateUI();
+}
+
+// Stop playing online. The table stays as it is and you carry on locally, playing both sides.
+function leaveOnline(tell) {
+  if (tell) netSend({ t: 'bye' });
+  clearTimeout(net.retry);
+  const peer = net.peer;
+  net.peer = null; net.conn = null;
+  if (peer) setTimeout(() => { try { peer.destroy(); } catch (e) {} }, 200);
+  // A shot we were watching just finishes here and gets judged locally
+  Object.assign(net, { on: false, host: false, connected: false, watch: null, started: false });
+  hideCard();
+  updateUI();
+}
+
+// ---- The online card ----
+const onlineBtn = netEl('onlineBtn');
+function savedName() { try { localStorage.setItem('pool-name', netEl('netName').value.trim()); } catch (e) {} }
+try { netEl('netName').value = localStorage.getItem('pool-name') || ''; } catch (e) {}
+function netError(t) { netEl('netErr').textContent = t; }
+function showCard(title, text, buttons, code) {
+  netEl('netCard').hidden = false;
+  netEl('netTitle').textContent = title;
+  netEl('netText').textContent = text;
+  netEl('netText').hidden = !text;
+  netEl('netMenu').hidden = true;
+  netEl('netNote').hidden = true;
+  netEl('netCodeBox').hidden = !code;
+  netEl('netCode').textContent = net.code;
+  for (const id of ['copyBtn', 'localBtn', 'leaveBtn']) netEl(id).hidden = !buttons.includes(id);
+  // Close just hides the card while connected; otherwise it cancels
+  netEl('netClose').textContent = net.on && net.connected ? 'Close' : 'Cancel';
+  netEl('netClose').hidden = net.on && !net.connected && net.started;
+  syncOnlineBtn();
+}
+function hideCard() { netEl('netCard').hidden = true; syncOnlineBtn(); }
+function syncOnlineBtn() {
+  onlineBtn.setAttribute('aria-pressed', net.on);
+  onlineBtn.classList.toggle('lost', net.on && !net.connected);
+}
+function showMenu() {
+  netError('');
+  showCard('Play online', '', []);
+  netEl('netMenu').hidden = false;
+  netEl('netNote').hidden = false;
+}
+function showWaiting() {
+  showCard('Your game code', 'Send your friend this code or the invite link. The game starts when they join.', ['copyBtn'], true);
+}
+function showConnected() {
+  const who = game.players[1 - net.me].name;
+  hideCard();
+  setReport('<strong>Connected to ' + who + '.</strong> ' + (game.turn === net.me ? 'Your shot.' : who + ' to play.'));
+  updateUI();
+}
+function netFail(msg) {
+  const peer = net.peer; net.peer = null;
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+  Object.assign(net, { on: false, host: false, connected: false, started: false });
+  showMenu();
+  netError(msg);
+  updateUI();
+}
+
+onlineBtn.addEventListener('click', () => {
+  audioInit();
+  if (!net.on) return showMenu();
+  if (net.connected) showCard('Playing online', 'Connected to ' + game.players[1 - net.me].name + ' · game code ' + net.code + '.', ['leaveBtn'], false);
+  else if (net.host && !net.started) showWaiting();
+  else if (net.host) showCard('Connection lost', 'Waiting for your friend to come back with code ' + net.code + '.', ['copyBtn', 'localBtn', 'leaveBtn'], true);
+  else showCard('Connection lost', 'Trying to reconnect…', ['localBtn', 'leaveBtn']);
+});
+netEl('hostBtn').addEventListener('click', () => hostGame());
+netEl('joinBtn').addEventListener('click', () => joinGame(netEl('joinCode').value));
+netEl('joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinGame(netEl('joinCode').value); });
+netEl('copyBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(inviteLink()); netEl('copyBtn').textContent = 'Link copied'; }
+  catch (e) { netEl('copyBtn').textContent = inviteLink(); }
+  setTimeout(() => { netEl('copyBtn').textContent = 'Copy invite link'; }, 2500);
+});
+netEl('localBtn').addEventListener('click', () => leaveOnline(false));
+netEl('leaveBtn').addEventListener('click', () => leaveOnline(true));
+netEl('netClose').addEventListener('click', () => {
+  if (net.on && net.connected) return hideCard();
+  if (net.on || net.peer) leaveOnline(false); else hideCard();
+});
+addEventListener('beforeunload', () => netSend({ t: 'bye' }));
+// Opened from an invite link: fill in the code and wait for them to press Join
+{
+  const j = new URLSearchParams(location.search).get('join');
+  if (j) { showMenu(); netEl('joinCode').value = j.toUpperCase().slice(0, 5); }
+}
+
 // Table size picker: remembers your choice in this browser if it can
 const tableSel = document.getElementById('tableSel');
 tableSel.innerHTML = Object.entries(TABLES).map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
 let startKey = 'uk7';
 try { const saved = localStorage.getItem('pool-table'); if (TABLES[saved]) startKey = saved; } catch (e) {}
 tableSel.value = startKey;
+let tableKey = startKey;
 function useTable(key) {
+  tableKey = key;
   applySpec(key);
   buildTable();
   newFrame(game.breaker);
   fitCamera();
   try { localStorage.setItem('pool-table', key); } catch (e) {}
+  netHostReset();
 }
 tableSel.addEventListener('change', () => useTable(tableSel.value));
 
@@ -1608,7 +2097,11 @@ rulesSel.addEventListener('change', () => {
   try { localStorage.setItem('pool-rules', rulesSel.value); } catch (e) {}
   useTable(tableSel.value);
 });
-document.getElementById('nextBtn').addEventListener('click', () => newFrame(1 - game.breaker));
+document.getElementById('nextBtn').addEventListener('click', () => {
+  // Online the host starts the next frame for both of you; the guest's button asks the host to
+  if (net.on && !net.host) { netSend({ t: 'next' }); return; }
+  newFrame(1 - game.breaker); netHostReset();
+});
 
 useTable(startKey);
 requestAnimationFrame(frame);
