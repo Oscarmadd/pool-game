@@ -1381,11 +1381,13 @@ let frozen = false;        // while true the normal cue-view pose is left alone 
 // It frames every ball the shot has set moving, cue ball included. While only the white is running it
 // rides close behind it; as more balls get knocked into motion it pulls back and climbs to keep them all
 // in shot, and it closes back in as they stop. A potted ball stays in the frame (at its pocket) until it
-// has dropped. The heading turns smoothly towards the way the balls are going overall.
+// has dropped. It keeps facing the way you shot and only drifts round very slowly (capped at a few
+// degrees a second) if the balls all head off somewhere else, so it never swings about.
 // It stays down for at least CHASE_MIN, until everything has (nearly) stopped, but never past CHASE_MAX.
 const CHASE_MIN = 1.2, CHASE_MAX = 6;   // seconds: always follow at least this long, never longer than that
 const CHASE_STOP = 0.12;                // a ball slower than this (m/s) counts as stopped and leaves the frame
 const POT_WATCH = 0.9;                  // seconds a potted ball stays in the frame while it drops
+const CHASE_TURN = 0.12;                // max heading turn, radians per second (about 7°/s): keep it calm
 let chasing = false, chaseTime = 0, chaseR = 0;
 const chaseMoved = new Set(), chasePotAt = new Map();
 const chaseDir = new THREE.Vector3(), chaseWant = new THREE.Vector3(), chaseC = new THREE.Vector3(), chaseFlow = new THREE.Vector3();
@@ -1419,17 +1421,24 @@ function updateChase(dt) {
   if ((n === 0 && chaseTime > CHASE_MIN) || chaseTime > CHASE_MAX) { chasing = false; return; }
   if (n > 0) {
     // Centre of the group, and how big a circle it needs to fit everything in
+    // The framing centre glides (it doesn't jump when a ball stops), and the circle is measured from
+    // where the centre actually is, so if it's lagging behind a fast ball the camera widens rather than losing it
     const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
-    let r = 0;
-    for (let i = 0; i < pts.length; i += 2) r = Math.max(r, Math.hypot(pts[i] - cx, pts[i + 1] - cz));
     chaseC.lerp(chaseWant.set(cx, 0, cz), 1 - Math.exp(-dt * 4));
-    // widen quickly when the action spreads, tighten more gently when balls stop
-    chaseR += (r - chaseR) * (1 - Math.exp(-dt * (r > chaseR ? 8 : 1.6)));
-    // Turn towards the overall direction of travel (summed velocities, so a spread doesn't cancel out the heading)
+    let r = 0;
+    for (let i = 0; i < pts.length; i += 2) r = Math.max(r, Math.hypot(pts[i] - chaseC.x, pts[i + 1] - chaseC.z));
+    // widen fairly quickly when the action spreads, tighten slowly when balls stop
+    chaseR += (r - chaseR) * (1 - Math.exp(-dt * (r > chaseR ? 4 : 0.8)));
+    // Heading: stays on the shot line. If the balls as a whole are clearly heading somewhere else,
+    // creep round towards it, never faster than CHASE_TURN (summed velocities, so a spread doesn't cancel out).
     const flow = Math.hypot(chaseFlow.x, chaseFlow.z);
-    if (flow > 0.05) {
-      chaseWant.set(chaseFlow.x / flow, 0, chaseFlow.z / flow);
-      chaseDir.lerp(chaseWant, 1 - Math.exp(-dt * 2.5)).normalize();
+    if (flow > 0.3) {
+      const want = Math.atan2(chaseFlow.z, chaseFlow.x), have = Math.atan2(chaseDir.z, chaseDir.x);
+      let d = want - have; d = Math.atan2(Math.sin(d), Math.cos(d));
+      if (Math.abs(d) < 2.5) {   // ignore balls coming straight back at the camera, rather than spinning round
+        const turn = Math.max(-CHASE_TURN * dt, Math.min(CHASE_TURN * dt, d * (1 - Math.exp(-dt * 0.8))));
+        chaseDir.set(Math.cos(have + turn), 0, Math.sin(have + turn));
+      }
     }
   }
   // How far back to sit so a circle of radius chaseR fits on screen (narrowest of the two fields of view)
@@ -1440,8 +1449,8 @@ function updateChase(dt) {
   // Low and close for one ball; climbs higher as the group spreads so balls don't hide behind each other
   const elev = 0.31 + 0.6 * Math.min(1, chaseR / 0.9);
   const back = dist * Math.cos(elev), up = dist * Math.sin(elev);
-  const ahead = 0.5 / (1 + chaseR * 6);           // look a little ahead of a lone ball, straight at a group
-  const follow = 1 - Math.exp(-dt * 7);           // bigger number = camera sticks closer to the action
+  const ahead = 0.3 / (1 + chaseR * 6);           // look a little ahead of a lone ball, straight at a group
+  const follow = 1 - Math.exp(-dt * 5);           // bigger number = camera sticks closer to the action (lower = calmer)
   chaseWant.set(chaseC.x - chaseDir.x * back, cue.r + up, chaseC.z - chaseDir.z * back);
   cuePose.pos.lerp(chaseWant, follow);
   chaseWant.set(chaseC.x + chaseDir.x * ahead, 0, chaseC.z + chaseDir.z * ahead);
