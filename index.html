@@ -48,6 +48,16 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #spinLabel{font:600 14px "Barlow Condensed",sans-serif;color:var(--ink);background:rgba(18,16,14,.86);padding:2px 10px;border-radius:10px}
 @media(max-width:600px){#spinBall{width:76px;height:76px}#spinBox{right:10px;bottom:10px}}
 #over[hidden]{display:none}
+/* Ball return (in the footer, so it never covers the table): potted balls drop out of a chute and roll along this gully */
+#ballRack{flex:0 0 auto;width:clamp(240px,26vw,360px);padding:4px 6px;border-radius:999px;pointer-events:none;
+  background:linear-gradient(#6b4527,#4a2e19 55%,#3a2413);box-shadow:0 6px 16px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.14)}
+#rackTrack{position:relative;aspect-ratio:15/1;container-type:inline-size;border-radius:999px;overflow:hidden;
+  background:linear-gradient(#050403,#15110d 70%,#1e1913);box-shadow:inset 0 2px 5px rgba(0,0,0,.9)}
+.rb{position:absolute;left:0;top:0;width:calc(100% / 15);aspect-ratio:1;visibility:hidden;will-change:transform}
+.rb i{position:absolute;inset:4%;border-radius:50%;display:grid;place-items:center}
+.rb b{width:56%;aspect-ratio:1;border-radius:50%;background:#f4f1ea;color:#111;display:grid;place-items:center;font:700 3.4cqw/1 Barlow,sans-serif}
+.rb::after{content:"";position:absolute;inset:4%;border-radius:50%;background:radial-gradient(circle at 36% 30%,rgba(255,255,255,.7) 0,rgba(255,255,255,0) 30%,rgba(0,0,0,0) 55%,rgba(0,0,0,.45) 100%)}
+@media(max-width:600px){#ballRack{order:-1;flex-basis:100%;width:100%}}
 .card{background:var(--panel);border:1px solid #3d352d;border-radius:12px;padding:26px 30px;text-align:center;max-width:min(420px,90%);box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .card h2{font:700 36px/1.05 "Barlow Condensed",sans-serif;margin:0 0 8px;text-wrap:balance}
 .card p{margin:0 0 10px;color:var(--dim)}
@@ -184,6 +194,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 </div>
 <footer>
   <div class="power"><b>Power</b><div class="meter"><i id="powerFill"></i></div><b id="powerPct">0%</b></div>
+  <div id="ballRack" title="Potted balls" aria-hidden="true"><div id="rackTrack"></div></div>
   <div id="report" class="grow" aria-live="polite">Break when ready.</div>
   <div id="players" aria-label="Players"></div>
 </footer>
@@ -822,6 +833,7 @@ function rack() {
   for (const b of balls) scene.remove(b.mesh);
   falling = [];
   balls = [];
+  potCount = 0;
   // The rules decide the order, row by row from the front. The black (8) sits in the middle of row 3,
   // right on the black spot, where the diagonals from the middle pockets to the far corners cross.
   const order = RULE.rack;
@@ -1024,6 +1036,7 @@ function hitCushion(into, b) {
 
 // Balls that are currently dropping into a pocket (just for the animation – physics already counts them as potted)
 let falling = [];
+let potCount = 0;         // pots so far this frame, so the ball return keeps them in the order they went in
 const FALL_TIME = 0.6;    // seconds
 
 function potBall(b) {
@@ -1032,6 +1045,7 @@ function potBall(b) {
   const p = POCKETS.reduce((best, q) => Math.hypot(b.x - q.x, b.z - q.z) < Math.hypot(b.x - best.x, b.z - best.z) ? q : best);
   falling.push({ b, p, t: 0, x0: b.x, z0: b.z, spinX: b.ux, spinZ: b.uz });
   b.potted = true; b.vx = b.vz = b.ux = b.uz = b.side = 0;
+  if (!admin.sim) b.potIdx = ++potCount;   // the order it went in, for the ball return
   if (!shot) return;
   if (b === cue) { shot.cuePotted = true; return; }
   shot.potted.push(b.n);
@@ -1715,6 +1729,71 @@ function updateFalling(dt) {
   falling = falling.filter(f => f.t < 1);
 }
 
+// ---- Ball return: potted balls drop out of a chute at the right-hand end of the gully along the bottom
+// of the screen, roll down to the left until they bump the ball in front, and stay there for the frame.
+// It's worked out from the balls themselves (which are potted, and the order they went in) every frame,
+// so it always matches the table: online, and after the admin panel's pot / respot / undo / re-rack.
+// The white isn't kept: it comes straight back out for the next shot.
+const RACK_SLOTS = 15;
+const rackTrack = document.getElementById('rackTrack');
+const rackItems = new Map();   // ball number -> { el, face, x, y, v, vy, target, wait }  (x, y in ball widths)
+let rackQueue = 0;             // seconds until the chute is free for the next ball
+let rackSet = '';              // ball colours the gully was drawn with (a rules change redraws it)
+
+function rackBall(n) {
+  const el = document.createElement('div'), face = document.createElement('i'), c = colourOf(n);
+  el.className = 'rb';
+  face.style.background = RULE.ballSet === 'ry' || n <= 8 ? c : `linear-gradient(#f4f1ea 0 24%, ${c} 24% 76%, #f4f1ea 76%)`;
+  if (RULE.ballSet !== 'ry' || n === 8) face.innerHTML = '<b>' + n + '</b>';
+  el.appendChild(face);
+  rackTrack.appendChild(el);
+  return { el, face };
+}
+// A ball rolling into the one in front (or the end of the gully): a small clack, not placed on the table
+function sfxRack(speed, end) {
+  if (!audioReady() || speed < 0.6) return;
+  const t = sound.ctx.currentTime, g = sound.ctx.createGain(), loud = Math.min(1, speed / 8);
+  g.gain.value = 0.12 + loud * 0.25; g.connect(sound.master);
+  if (end) { tone(g, t, 520, 300, 0.06, 0.5); burst(g, t, 'lowpass', 900, 0.7, 0.04, 0.3); }
+  else { tone(g, t, 2300, 2100, 0.03, 0.45); burst(g, t, 'bandpass', 3800, 1.4, 0.015, 0.35); }
+}
+function updateRack(dt) {
+  rackQueue = Math.max(0, rackQueue - dt);
+  if (rackSet !== RULE.ballSet) { for (const it of rackItems.values()) it.el.remove(); rackItems.clear(); rackSet = RULE.ballSet; }
+  const potted = balls.filter(b => b.potted && b.n !== 0).sort((a, b) => (a.potIdx || 0) - (b.potIdx || 0) || a.n - b.n);
+  for (const [n, it] of rackItems) if (!potted.some(b => b.n === n)) { it.el.remove(); rackItems.delete(n); }   // back on the table
+  potted.forEach((b, i) => {
+    let it = rackItems.get(b.n);
+    if (!it) {
+      // wait until it has dropped out of sight in the pocket, and for the ball ahead to clear the chute
+      const wait = Math.max(state === 'moving' || falling.some(f => f.b === b) ? FALL_TIME * 0.9 : 0.05, rackQueue);
+      rackQueue = wait + 0.32;
+      it = { ...rackBall(b.n), x: RACK_SLOTS - 1, y: -1.1, v: 0, vy: 0, wait };
+      rackItems.set(b.n, it);
+    }
+    it.target = i;
+  });
+  for (const it of rackItems.values()) {
+    if (it.wait > 0) { it.wait -= dt; continue; }
+    it.el.style.visibility = 'visible';
+    if (it.y < 0) {   // dropping out of the chute
+      it.vy += 40 * dt; it.y = Math.min(0, it.y + it.vy * dt);
+    } else if (it.x > it.target + 0.0005 || it.v !== 0) {   // the gully slopes down to the left
+      it.v = Math.max(-11, it.v - 16 * dt);
+      it.x += it.v * dt;
+      if (it.x <= it.target) {   // bumped the ball in front (or the end): a little bounce, then settle
+        sfxRack(-it.v, it.target === 0);
+        it.x = it.target;
+        it.v = it.v < -1.2 ? -it.v * 0.22 : 0;
+      }
+    } else if (it.x < it.target - 0.0005) {   // online the order was corrected: slide back to its place
+      it.x = Math.min(it.target, it.x + 6 * dt); it.v = 0;
+    }
+    it.el.style.transform = `translate(${it.x * 100}%, ${it.y * 100}%)`;
+    it.face.style.transform = `rotate(${it.x * 360 / Math.PI}deg)`;   // rolling: turns once per circumference
+  }
+}
+
 // Physics runs in fixed small steps (the same on every computer), so a shot played from the same
 // start plays out the same way – that's what lets an online opponent watch your shot on their table.
 const PHYS_H = 1 / (60 * SUBSTEPS);
@@ -1739,6 +1818,7 @@ function frame(now) {
   }
   netTick(now);
   updateFalling(dt);
+  updateRack(dt);
   updateAimVisuals();
   updateCamera(dt);
   sfxRolling();
@@ -1789,7 +1869,8 @@ function makeCode() {
 const inviteLink = () => location.origin + location.pathname + '?join=' + net.code;
 
 // ---- What gets sent ----
-const ballState = () => balls.map(b => [b.n, b.x, b.z, b.potted ? 1 : 0]);
+// 4th value: 0 = on the table, otherwise potted (and the order it went in, so both ball returns match)
+const ballState = () => balls.map(b => [b.n, b.x, b.z, b.potted ? b.potIdx || 1 : 0]);
 function fullState() {
   const over = game.over ? { title: netEl('overTitle').textContent, why: netEl('overWhy').textContent, score: netEl('overScore').textContent } : null;
   const rep = netEl('report');
@@ -1830,6 +1911,7 @@ function applyBalls(list) {
     b.vx = b.vz = b.ux = b.uz = b.side = 0;
     if (p) {
       if (!b.potted) { b.potted = true; b.mesh.visible = false; }
+      b.potIdx = p; potCount = Math.max(potCount, p);
     } else {
       if (b.potted) {   // our copy had it potted but it wasn't: bring it back
         b.potted = false;
@@ -2276,6 +2358,7 @@ admEl('admHand').addEventListener('change', e => {
 function adminPot(b) {
   falling = falling.filter(f => f.b !== b);
   b.potted = true; b.vx = b.vz = b.ux = b.uz = b.side = 0; b.mesh.visible = false;
+  b.potIdx = ++potCount;
 }
 function adminRespot(b) {
   if (b === cue) { respawnCue(); return; }
