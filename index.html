@@ -2407,6 +2407,52 @@ function simulate(p, target, needCush) {
     shot = savedShot; falling = savedFalling; admin.sim = false;
   }
 }
+// Play shot p silently right to the end and record where every ball goes, so the found shot can be drawn
+// on the table. Returns { ball number: [x, z, x, z, ...] } for the balls that moved.
+function tracePath(p) {
+  const saved = balls.map(b => [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted]);
+  const savedShot = shot, savedFalling = falling;
+  admin.sim = true; falling = [];
+  shot = { number: 0, power: 0, firstHit: null, potted: [], cushions: 0, cushionAfterHit: false, cuePotted: false,
+           isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set(), cueFirst: 0 };
+  const path = {}, gone = new Set();
+  for (const b of balls) if (b.potted) gone.add(b.n);   // already off the table: nothing to draw
+  const note = () => { for (const b of balls) if (!gone.has(b.n)) { (path[b.n] = path[b.n] || []).push(b.x, b.z); if (b.potted) gone.add(b.n); } };
+  try {
+    launchCue(p); note();
+    for (let i = 1; i < 20 / PHYS_H; i++) {
+      step(PHYS_H);
+      if (i % 15 === 0) note();
+      if (i % 10 === 0 && !anyMoving()) break;
+    }
+    note();
+  } finally {
+    balls.forEach((b, i) => { [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted] = saved[i]; });
+    shot = savedShot; falling = savedFalling; admin.sim = false;
+  }
+  for (const n in path) {   // keep only the balls that actually moved
+    const a = path[n];
+    if (Math.hypot(a[a.length - 2] - a[0], a[a.length - 1] - a[1]) < 0.002 && !gone.has(+n)) delete path[n];
+  }
+  return path;
+}
+// Draw (or clear) the found shot's path: the white in white, the target in its colour, anything else knocked on in grey
+let pathGroup = null;
+function showPath(path, target) {
+  if (pathGroup) { scene.remove(pathGroup); pathGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); pathGroup = null; }
+  if (!path) return;
+  pathGroup = new THREE.Group();
+  for (const n in path) {
+    const a = path[n], pts = [];
+    for (let i = 0; i < a.length; i += 2) pts.push(new THREE.Vector3(a[i], 0.004, a[i + 1]));
+    const col = +n === 0 ? 0xffffff : +n === target ? new THREE.Color(colourOf(+n)).offsetHSL(0, 0, 0.15) : 0x9a9389;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: +n === 0 || +n === target ? 0.95 : 0.6, depthWrite: false }));
+    line.renderOrder = 2;
+    pathGroup.add(line);
+  }
+  scene.add(pathGroup);
+}
+
 // Higher is better: a clean pot scores 3, potting but losing the white 2, hitting it right 1 to 2, a miss below 0
 const shotScore = r => r.potted ? (r.cueIn ? 2 : 3) : r.hit ? 2 - Math.min(1, r.pocketNear / 0.4) : -Math.min(1, r.near) - 1;
 
@@ -2419,7 +2465,8 @@ function* findShot(target, needCush, useSpin) {
     const ux = q.x - target.x, uz = q.z - target.z, d = Math.hypot(ux, uz);
     const gx = target.x - ux / d * (target.r + cue.r), gz = target.z - uz / d * (target.r + cue.r);
     const ang = Math.atan2(gz - cue.z, gx - cue.x);
-    for (const pw of [0.3, 0.45, 0.65]) tries.push(mk(ang, pw, 0, 0));
+    // plain centre-ball shots, plus a hair either side (the real physics says whether another ball is in the way)
+    for (const da of [0, -0.004, 0.004, -0.009, 0.009]) for (const pw of [0.25, 0.4, 0.55, 0.75]) tries.push(mk(ang + da, pw, 0, 0));
   }
   // Then shots all round the clock (that's where the cushion and swerve shots come from)
   const wide = needCush ? 700 : 260;
@@ -2429,7 +2476,7 @@ function* findShot(target, needCush, useSpin) {
   for (const p of tries) {
     const r = simulate(p, target, needCush); n++;
     scored.push({ p, r, s: shotScore(r) });
-    if (r.potted && !r.cueIn) return { p, r, n };
+    if (r.potted && !r.cueIn) return { p, r, n, target: target.n };
     yield n;
   }
   // Fine-tune the best few: nudge the angle, power and spin, keep whatever does better, and nudge less over time
@@ -2441,7 +2488,7 @@ function* findShot(target, needCush, useSpin) {
       const p = mk(a, b.power + (rnd() - 0.5) * 0.25 * size, Math.max(-1, Math.min(1, b.sx + (rnd() - 0.5) * 0.6 * size)), Math.max(-1, Math.min(1, b.sy + (rnd() - 0.5) * 0.6 * size)));
       const r = simulate(p, target, needCush); n++;
       const sc = shotScore(r);
-      if (r.potted && !r.cueIn) return { p, r, n };
+      if (r.potted && !r.cueIn) return { p, r, n, target: target.n };
       if (sc > best.s) best = { p, r, s: sc }; else size = Math.max(0.05, size * 0.93);
       yield n;
     }
@@ -2475,9 +2522,11 @@ admEl('admFind').addEventListener('click', () => {
     const out = res.value, secs = ((performance.now() - t0) / 1000).toFixed(1);
     if (!out) { finderStop(`Couldn't find one in ${secs}s. Try fewer cushions, turning spin on, or more max power.`); return; }
     finder.found = { p: out.p, key: finder.key };
+    showPath(tracePath(out.p), out.target);
     finderStop(`Found one after ${out.n} tries (${secs}s): ${Math.round(out.p.power * 100)}% power` +
       (out.p.sx || out.p.sy ? `, spin ${out.p.sx >= 0 ? 'right' : 'left'} ${Math.abs(out.p.sx * 100).toFixed(0)}% / ${out.p.sy >= 0 ? 'top' : 'back'} ${Math.abs(out.p.sy * 100).toFixed(0)}%` : ', centre ball') +
-      (out.r.cush ? `, ${out.r.cush} cushion${out.r.cush > 1 ? 's' : ''} first` : '') + '. You’re lined up on it.');
+      (out.r.cush ? `, ${out.r.cush} cushion${out.r.cush > 1 ? 's' : ''} first` : '') +
+      '. The lines on the table show where the balls will go. Press Take the shot to play it exactly (pulling the cue back yourself uses your own power, so it won’t go the same way).');
     adminLineUp();
   };
   requestAnimationFrame(work);
@@ -2560,6 +2609,8 @@ function adminTick(now) {
   admFrames++;
   if (now - admLast > 160) {
     admin.fps = admFrames * 1000 / (now - admLast); admFrames = 0; admLast = now;
+    // The drawn path only holds while the table is exactly as it was when the shot was found
+    if (pathGroup && (!admin.open || !finder.found || state !== 'aim' || ballState().join('|') !== finder.found.key)) showPath(null);
     if (admin.open) {
       const live = balls.filter(b => !b.potted);
       const fast = live.reduce((m, b) => Math.max(m, Math.hypot(b.vx, b.vz)), 0);
