@@ -167,7 +167,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <div class="row" style="margin-top:6px"><button id="admUndo">Undo last shot</button><button id="admRack">Re-rack</button></div>
     </section>
     <section><h3>Perfect shot</h3>
-      <p class="note" style="margin-bottom:6px">Tries shots out in the background until one pots the ball, then lines you up on it.</p>
+      <p class="note" style="margin-bottom:6px">Tries shots out in the background until one pots the ball, then lines you up on it. In the overhead view you can just click the ball you want.</p>
       <div class="row"><span class="lbl">Pot</span><select id="admTarget"></select></div>
       <div class="row" style="margin-top:6px"><span class="lbl">Cushions</span><select id="admCush"><option value="0">None needed</option><option value="1">White off 1+ cushion first</option><option value="2">White off 2+ cushions first</option><option value="3">White off 3+ cushions first</option><option value="4">White off 4+ cushions first</option></select></div>
       <div class="row" style="margin-top:6px"><label><input type="checkbox" id="admSpin" checked> Use spin and swerve</label></div>
@@ -2556,6 +2556,32 @@ admEl('admTake').addEventListener('click', () => {
   adminRefresh();
 });
 
+// Pick the finder's target by clicking a ball: from the overhead view (Overview, or the top view before you
+// get down on the shot), clicking any ball but the white picks it and starts looking for a shot on it.
+// A ring on the table shows which ball is picked while the panel is open.
+el.addEventListener('pointerdown', e => {
+  if (!admin.open || admin.moving || view !== 'top' || camBlend > 0 || state !== 'aim' || game.over) return;
+  const p = tablePoint(e), b = p && adminBallAt(p);
+  if (!b || b === cue) return;   // the white (ball in hand) and empty table work as normal
+  const ts = admEl('admTarget');
+  if (![...ts.options].some(o => +o.value === b.n)) return;
+  e.stopImmediatePropagation();
+  ts.value = b.n;
+  if (finder.run) finderStop('');
+  if (!admEl('admFind').disabled) admEl('admFind').click();
+  else admEl('admFindMsg').textContent = (b.n === 8 ? 'The black' : 'Ball ' + b.n) + ' picked. ' + (myTurn() ? '' : 'You can look for a shot on your turn.');
+  adminRefresh();
+}, true);
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(1, 1.25, 40), new THREE.MeshBasicMaterial({ color: 0xd9a441, transparent: true, opacity: 0.9, depthWrite: false }));
+targetRing.rotation.x = -Math.PI / 2; targetRing.renderOrder = 2; targetRing.visible = false;
+scene.add(targetRing);
+function updateTargetRing() {
+  const b = admin.open && state === 'aim' && balls.find(q => q.n === +admEl('admTarget').value && !q.potted && q.n !== 0);
+  targetRing.visible = !!b;
+  if (b) { targetRing.position.set(b.x, 0.003, b.z); targetRing.scale.setScalar(b.r * 1.15); }
+}
+admEl('admTarget').addEventListener('change', updateTargetRing);
+
 // ---- Physics ----
 admEl('admTime').addEventListener('change', e => { admin.timeScale = +e.target.value; });
 admEl('admPower').addEventListener('input', e => { admin.powerScale = e.target.value / 100; admEl('admPowerVal').textContent = e.target.value + '%'; updatePower(); });
@@ -2614,6 +2640,7 @@ function adminTick(now) {
   admFrames++;
   if (now - admLast > 160) {
     admin.fps = admFrames * 1000 / (now - admLast); admFrames = 0; admLast = now;
+    updateTargetRing();
     // The drawn path only holds while the table is exactly as it was when the shot was found
     if (pathGroup && (!admin.open || !finder.found || state !== 'aim' || ballState().join('|') !== finder.found.key)) showPath(null);
     if (admin.open) {
