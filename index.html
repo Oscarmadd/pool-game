@@ -94,6 +94,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #matchCard input[disabled]{opacity:.6}
 #matchCard .seg{display:flex;gap:6px}#matchCard .seg button{flex:1;padding:0 6px}
 #matchCard .seg button[disabled]{opacity:.45;cursor:default}
+#matchCard .seg.who{margin-top:-2px}#matchCard .seg.who button{min-height:34px;font-size:13px;white-space:nowrap;padding:0 4px}
 #matchCard .small{font-size:13px;color:var(--dim)}
 #matchStart{border-color:var(--brass);color:var(--brass);margin-top:4px}
 #report.foul strong{color:#ef8a6d}
@@ -259,7 +260,9 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <div id="matchCard" hidden><div class="card" role="dialog" aria-labelledby="matchTitle">
     <h2 id="matchTitle">Match</h2>
     <label for="mName0">Player 1</label><input id="mName0" maxlength="16" autocomplete="off" placeholder="Player 1">
+    <div class="seg who" id="mWho0" role="group" aria-label="Who plays Player 1: a person, or the computer at easy, medium or hard"><button data-l="">Person</button><button data-l="easy" title="Computer, easy">CPU easy</button><button data-l="medium" title="Computer, medium">CPU med</button><button data-l="hard" title="Computer, hard">CPU hard</button></div>
     <label for="mName1">Player 2</label><input id="mName1" maxlength="16" autocomplete="off" placeholder="Player 2">
+    <div class="seg who" id="mWho1" role="group" aria-label="Who plays Player 2: a person, or the computer at easy, medium or hard"><button data-l="">Person</button><button data-l="easy" title="Computer, easy">CPU easy</button><button data-l="medium" title="Computer, medium">CPU med</button><button data-l="hard" title="Computer, hard">CPU hard</button></div>
     <label>Length</label>
     <div class="seg" id="mBest" role="group" aria-label="Match length"><button data-n="3">Best of 3</button><button data-n="5">Best of 5</button><button data-n="7">Best of 7</button><button data-n="0">No limit</button></div>
     <p class="small" id="matchNote"></p>
@@ -582,6 +585,8 @@ const game = {
   // Power-ups mode: what each player holds this visit ({ id, used } or null), what's switched on for the
   // coming shot, the frame's dealing seed and a count of visits (the seed + count pick the next ones)
   pu: [null, null], fx: [], walls: [], puSeed: 0, visit: 0,
+  // Computer opponents (local play only): null = a person plays, or 'easy' / 'medium' / 'hard' (see section 11)
+  cpu: [null, null],
 };
 const framesToWin = () => game.bestOf ? Math.ceil(game.bestOf / 2) : 0;
 // Match details that travel with every sync, admin change and undo
@@ -600,20 +605,39 @@ function newMatch(breaker) {
 try {   // names and match length from last time, for local play
   const m = JSON.parse(localStorage.getItem('pool-match') || 'null');
   if (m) { takeMatch(m); game.history = []; game.matchOver = false;
+           if (Array.isArray(m.cpu)) game.cpu = [0, 1].map(i => ['easy', 'medium', 'hard'].includes(m.cpu[i]) ? m.cpu[i] : null);
            (m.names || []).forEach((n, i) => { if (i < 2 && typeof n === 'string' && n) game.players[i].name = n.replace(/[<>&"'`]/g, '').slice(0, 16); }); }
 } catch (e) {}
 function saveMatch() {
   if (net.on) return;   // online names come from the online card, so keep the local ones as they were
-  try { localStorage.setItem('pool-match', JSON.stringify({ bestOf: game.bestOf, names: game.players.map(p => p.name) })); } catch (e) {}
+  try { localStorage.setItem('pool-match', JSON.stringify({ bestOf: game.bestOf, names: game.players.map(p => p.name), cpu: game.cpu })); } catch (e) {}
 }
 
 // Online play (see section 9). me = which player this browser is (0 = host, 1 = guest).
 // When online, only the player whose turn it is can aim, move the white or shoot.
 const net = { on: false, host: false, connected: false, me: 0, seq: 0, watch: null };
-const myTurn = () => !net.on || (net.connected && game.turn === net.me);
+// Computer opponent levels (section 11). aim = how far its cueing wanders (radians, one standard deviation),
+// pow / spinErr = the same for weight and spin. The rest is how hard it thinks: how many pots it looks at
+// (pairs), other weights and spin to try on its best ones (variants: power x, side, top/screw), how much it
+// cares where the white ends up (pos), whether it plays safe, and how many spots it tries with ball in hand.
+const CPU_LEVELS = {
+  easy:   { name: 'Easy', aim: 0.011, pow: 0.15, spinErr: 0.15, think: 1400, pairs: 4, variants: [], seeds: 0, wobble: 0, robust: 0,
+            safety: false, spots: 1, pos: 0, wide: 16, spin: false, sloppy: 0.3, usePU: 0.5, breakPower: 0.8, breakSide: 0 },
+  medium: { name: 'Medium', aim: 0.0042, pow: 0.06, spinErr: 0.08, think: 1600, pairs: 8, seeds: 3, wobble: 0.0045, robust: 6,
+            variants: [[1, 0, 0.5], [1, 0, -0.5], [1.4, 0, 0], [0.75, 0, 0]],
+            safety: true, safeBalls: 3, safeCuts: [-0.5, 0, 0.5], safePowers: [0.2, 0.32, 0.48],
+            spots: 3, pos: 0.5, wide: 40, spin: false, sloppy: 0, usePU: 0.8, breakPower: 0.92, breakSide: 0.5 },
+  hard:   { name: 'Hard', aim: 0.0013, pow: 0.025, spinErr: 0.03, think: 1800, pairs: 16, seeds: 6, wobble: 0.003, robust: 14,
+            variants: [[1, 0, 0.6], [1, 0, -0.6], [1.4, 0, 0], [0.75, 0, 0], [1.3, 0, -0.7], [0.8, 0, 0.5], [1, 0.5, 0], [1, -0.5, 0]],
+            safety: true, safeBalls: 6, safeCuts: [-0.7, -0.35, 0, 0.35, 0.7], safePowers: [0.15, 0.24, 0.36, 0.52],
+            spots: 6, pos: 1, wide: 100, spin: true, sloppy: 0, usePU: 1, breakPower: 1, breakSide: 1 },
+};
+// The computer's level if it's playing player i right now (never online, and not in free play, which has no turns)
+const cpuAt = i => !net.on && RULE.groupNames && game.cpu[i] ? CPU_LEVELS[game.cpu[i]] : null;
+const myTurn = () => net.on ? net.connected && game.turn === net.me : !cpuAt(game.turn);
 // Where the camera should be for the next shot: overhead if the white has to be placed, or if it's
-// your friend's turn online (you watch from above while they play); otherwise down on the shot.
-const nextView = () => (net.on && game.turn !== net.me) || (game.ballInHand && game.ballInHand !== 'baulk-optional') ? 'top' : 'cue';
+// your friend's turn online or the computer's (you watch from above while they play); otherwise down on the shot.
+const nextView = () => (net.on && game.turn !== net.me) || cpuAt(game.turn) || (game.ballInHand && game.ballInHand !== 'baulk-optional') ? 'top' : 'cue';
 
 function newFrame(breaker) {
   game.breaker = breaker; game.turn = breaker;
@@ -723,7 +747,12 @@ function updateUI() {
   const hostOnly = net.on && (!net.host || state === 'moving');
   for (const id of ['rackBtn', 'rulesSel', 'tableSel']) document.getElementById(id).disabled = hostOnly;
   document.getElementById('matchBtn').disabled = state === 'moving' || !RULE.groupNames;
-  if (net.on && !myTurn()) {
+  if (!net.on && cpuAt(game.turn)) {
+    const them = game.players[game.turn].name, mine = game.pu[1 - game.turn];
+    h.hidden = game.over;
+    h.textContent = state === 'aim' ? them + ' is at the table' + (RULE.powerups && mine && !mine.used && POWERUPS[mine.id].kind === 'def' ? ' · E uses your defence power-up' : '')
+      : 'Watching ' + them + "'s shot";
+  } else if (net.on && !myTurn()) {
     const them = game.players[game.turn].name;
     h.hidden = game.over || !net.connected;
     h.textContent = state === 'aim' ? 'Waiting for ' + them + ' to play' : 'Watching ' + them + "'s shot";
@@ -1163,12 +1192,16 @@ function step(h) {
 
   // Cushions: check each ball against every cushion edge (nose and jaws)
   for (const b of live) {
-    for (const [p, q] of WALLS) {
+    // Every cushion edge lies on or outside the cushion noses, so a ball more than its radius inside them can't touch one
+    const nearEdge = Math.abs(b.x) > HX - b.r - 1e-4 || Math.abs(b.z) > HZ - b.r - 1e-4;
+    if (nearEdge) for (const [p, q] of WALLS) {
       // closest point on the edge p→q to the ball's centre
       const ex = q[0] - p[0], ez = q[1] - p[1];
       const t = Math.max(0, Math.min(1, ((b.x - p[0]) * ex + (b.z - p[1]) * ez) / (ex * ex + ez * ez)));
       const cx = p[0] + ex * t, cz = p[1] + ez * t;
-      const dx = b.x - cx, dz = b.z - cz, d = Math.hypot(dx, dz);
+      const dx = b.x - cx, dz = b.z - cz;
+      if (dx * dx + dz * dz >= b.r * b.r * 1.0001) continue;   // quick reject first (most edges are nowhere near)
+      const d = Math.hypot(dx, dz);
       if (d >= b.r || d === 0) continue;
       const nx = dx / d, nz = dz / d;              // direction pointing away from the cushion
       b.x = cx + nx * b.r; b.z = cz + nz * b.r;        // push the ball back out so it's just touching
@@ -1436,6 +1469,7 @@ function puCanUse(i) {
   const u = game.pu[i];
   if (!RULE.powerups || !u || u.used || game.over || state !== 'aim' || net.watch) return false;
   if (net.on && (!net.connected || i !== net.me)) return false;
+  if (cpuAt(i) && !cpu.acting) return false;   // the computer's own card: only it plays that
   return (POWERUPS[u.id].kind === 'att') === (i === game.turn);
 }
 function usePowerup(i, wall) {
@@ -1472,7 +1506,7 @@ function drawPU() {
   const fxTxt = on && ids.length ? 'On this shot: ' + ids.map(id => `<span class="${POWERUPS[id].kind === 'att' ? 'a' : 'd'}">${POWERUPS[id].name}</span>`).join(' · ') : '';
   // the shooter's card first locally; your own card first online
   const order = net.on ? [net.me, 1 - net.me] : [game.turn, 1 - game.turn];
-  const key = [on, fxTxt, state, game.turn, net.on, net.me, net.connected, !!net.watch, wallPick.i, JSON.stringify(game.pu)].join('|');
+  const key = [on, fxTxt, state, game.turn, net.on, net.me, net.connected, !!net.watch, wallPick.i, JSON.stringify(game.pu), game.cpu].join('|');
   if (key === puKey) return;
   puKey = key;
   fxLine.hidden = !fxTxt; fxLine.innerHTML = fxTxt;
@@ -3362,9 +3396,12 @@ function matchCardRefresh() {
     inp.disabled = net.on;   // online, names come from the online card
   }
   for (const b of matchEl('mBest').children) { b.setAttribute('aria-pressed', +b.dataset.n === matchPick); b.disabled = guest; }
+  for (const i of [0, 1]) for (const b of matchEl('mWho' + i).children) {   // computer opponents: local play only
+    b.setAttribute('aria-pressed', (game.cpu[i] || '') === b.dataset.l && !(net.on && b.dataset.l)); b.disabled = net.on;
+  }
   matchEl('matchStart').hidden = guest;
   matchEl('matchNote').textContent = guest ? 'Your friend is hosting, so they set up the match.'
-    : (net.on ? 'Names come from the online card. ' : '') + 'Starting a new match sets the score back to 0–0 and re-racks'
+    : (net.on ? 'Names come from the online card, and the computer only plays in local games. ' : 'Picking who plays takes effect straight away. ') + 'Starting a new match sets the score back to 0–0 and re-racks'
       + (net.on ? ' for both of you.' : '.');
 }
 function matchOpen(on) {
@@ -3377,6 +3414,15 @@ matchEl('mBest').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b || b.disabled) return;
   matchPick = +b.dataset.n; matchCardRefresh();
+});
+// Person or computer for each player. A computer gets a name to match unless you've named it yourself.
+for (const i of [0, 1]) matchEl('mWho' + i).addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled || net.on) return;
+  const lv = b.dataset.l || null, nm = game.players[i].name, auto = /^(Player \d|CPU( \w+)?)$/.test(nm);
+  game.cpu[i] = lv;
+  if (auto) game.players[i].name = lv ? 'CPU ' + CPU_LEVELS[lv].name.toLowerCase() : 'Player ' + (i + 1);
+  saveMatch(); matchCardRefresh(); updateUI();
 });
 for (const i of [0, 1]) matchEl('mName' + i).addEventListener('input', e => {
   if (net.on) return;
@@ -3815,9 +3861,9 @@ const strokeTime = pw => 450 - Math.min(1, pw) * 200;
 function strokeThrough(pw, hit) {
   runStroke([{ dur: strokeTime(pw), raw: true, fn: k => { power = pw * (1 - k * k); updatePower(); } }], hit, () => state !== 'aim');
 }
-el.addEventListener('pointerdown', e => { if (stroke.on) e.stopImmediatePropagation(); }, true);
+el.addEventListener('pointerdown', e => { if (stroke.on && !cpu.stroking) e.stopImmediatePropagation(); }, true);
 addEventListener('keydown', e => {
-  if (!stroke.on || (e.target.closest && e.target.closest('input, select, textarea'))) return;
+  if (!stroke.on || cpu.stroking || (e.target.closest && e.target.closest('input, select, textarea'))) return;
   e.stopImmediatePropagation(); e.preventDefault();
 }, true);
 
@@ -3930,6 +3976,410 @@ function adminTick(now) {
   requestAnimationFrame(adminTick);
 }
 requestAnimationFrame(adminTick);
+
+// ================================================================
+// 11. COMPUTER OPPONENT (local play only)
+// ================================================================
+// The computer plays its turn the same way the admin panel's shot finder works: it tries shots out silently
+// on the real table (same physics, then every ball goes back), asks the rules engine what each one would lead
+// to, and plays the one it likes best, with the same slow "Take the shot" stroke. It watches from the overhead
+// view, so the camera stays still while it plays.
+// What makes the levels different (CPU_LEVELS, up by the game state): how many ideas it tries, whether it
+// thinks about where the white finishes and plays safe when nothing's on, and how accurately it cues.
+const cpu = { key: '', phase: '', t0: 0, run: null, out: null, acting: false, stroking: false, attKey: '', defKey: '', defAt: 0, defWill: false };
+const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+// Everything the computer's plan depends on: if any of it changes (a power-up, the admin panel), it thinks again
+const cpuKey = () => [ballState().join('|'), game.turn, game.cpu[game.turn], game.fx.join(), JSON.stringify(game.walls), game.ballInHand,
+  game.freeShot, game.isBreak, game.extraVisit, game.players.map(p => p.group).join(), tableKey, admin.powerScale].join('#');
+
+// Is a straight line from (x1, z1) to (x2, z2) clear for a ball of radius r? (skip = balls to ignore)
+function cpuClear(x1, z1, x2, z2, r, skip) {
+  const ex = x2 - x1, ez = z2 - z1, len2 = ex * ex + ez * ez;
+  for (const o of balls) {
+    if (o.potted || skip.includes(o)) continue;
+    const t = len2 ? Math.max(0, Math.min(1, ((o.x - x1) * ex + (o.z - z1) * ez) / len2)) : 0;
+    if (Math.hypot(o.x - x1 - ex * t, o.z - z1 - ez * t) < r + o.r - 0.0005) return false;
+  }
+  return true;
+}
+// How likely is potting ball b in pocket q with the white at (cx, cz)? Just geometry, so it's quick enough to
+// judge every leave. The object ball has to pass the two jaw points with room to spare, and the way in is
+// through the middle of the mouth. That room, over the distance to the pocket, is how far off line the object
+// ball may go; the white's distance and the cut multiply any error in the cueing on the way there. The answer
+// is the chance a cueing error of about 0.25° stays inside that: 0 = can't (blocked, too thin, no way in),
+// near 1 = a short straight one.
+const erf = x => { const t = 1 / (1 + 0.3275911 * Math.abs(x)), y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x < 0 ? -y : y; };
+function cpuPair(cx, cz, b, q) {
+  const tx = q.mx - b.x, tz = q.mz - b.z, td = Math.hypot(tx, tz), ux = tx / td, uz = tz / td;
+  const jx = q.jaws[1][0] - q.jaws[0][0], jz = q.jaws[1][1] - q.jaws[0][1], room = q.half * Math.abs(ux * jz - uz * jx) / Math.hypot(jx, jz) - b.r;
+  if (room < 0.0008) return null;                                         // too shallow a way in: it would hit a jaw
+  const gx = b.x - ux * (b.r + cue.r), gz = b.z - uz * (b.r + cue.r);   // the ghost ball: where the white has to be at contact
+  const ax = gx - cx, az = gz - cz, ad = Math.hypot(ax, az);
+  if (ad < 0.002) return null;
+  const cos = (ax * ux + az * uz) / ad;
+  if (cos < 0.26) return null;                                            // thinner than about 75°: forget it
+  if (!cpuClear(cx, cz, gx, gz, cue.r, [cue, b]) || !cpuClear(b.x, b.z, q.mx, q.mz, b.r, [cue, b])) return null;
+  const gain = 1 + Math.hypot(b.x - cx, b.z - cz) / ((b.r + cue.r) * cos);   // object ball's error per unit of cueing error
+  const tol = room / (td + 0.03) / gain;                                     // how far off the cueing can be (radians)
+  return { b, q, ang: Math.atan2(az, ax), want: Math.atan2(uz, ux), ad, td, cos, tol, e: erf(tol / 0.0062) };
+}
+// Balls player `who` may hit next, by the rules, in game state g (pass a copy of game to look ahead)
+const cpuOn = (g, who) => balls.filter(b => b !== cue && !b.potted && (!RULE.isOn || RULE.isOn(b.n, { ...g, turn: who })));
+// The best pot player `who` would have with the white where it is now
+function cpuEase(g, who) {
+  if (cue.potted) return 0.8;
+  let e = 0;
+  for (const b of cpuOn(g, who)) for (const q of POCKETS) { const p = cpuPair(cue.x, cue.z, b, q); if (p) e = Math.max(e, p.e); }
+  return e;
+}
+// Every pot that's on from (cx, cz), easiest first
+function cpuPairs(cx, cz) {
+  const out = [];
+  for (const b of cpuOn({ ...game, freeShot: game.freeShot }, game.turn)) for (const q of POCKETS) { const p = cpuPair(cx, cz, b, q); if (p && p.e > 0.015) out.push(p); }
+  return out.sort((a, b) => b.e - a.e);
+}
+// About how hard to hit it: enough to get the object ball to the pocket with some pace to spare
+function cpuPower(pr) {
+  // The object ball leaves with roughly 0.45 of the white's starting speed x the cut (the white's skid, the hit
+  // and the object ball's own skid each take some), then has to roll to the pocket and still drop.
+  const a = T.roll * G, chalk = game.fx.includes('chalk') ? PU_CHALK : 1;
+  const vObj = Math.sqrt(2 * a * (pr.td + 0.2)) + 0.25;
+  const v0 = vObj / (0.45 * Math.max(0.35, pr.cos)) + 0.3 * pr.ad;
+  return Math.max(0.12, Math.min(1, Math.pow(Math.max(0, v0 - 0.25) / (MAX_SPEED * (admin.powerScale > 0 ? Math.min(2, admin.powerScale) : 1) * chalk), 1 / 1.3)));
+}
+// The shot data for a try, built exactly as shoot() builds it, so the try plays like the real thing
+function cpuShot(ang, pw, sx, sy) {
+  const p = { ax: Math.cos(ang), az: Math.sin(ang), power: Math.max(0.05, Math.min(1, pw)), sx, sy, ps: admin.powerScale, brk: game.isBreak ? 1 : 0 };
+  if (game.fx.length) {
+    p.fx = [...game.fx];
+    if (p.fx.includes('blunt')) p.sx = p.sy = 0;
+    if (p.fx.includes('short')) p.power = Math.min(p.power, PU_SHORT);
+    if (game.walls.length) p.walls = cleanWalls(game.walls);
+    if (p.fx.includes('ghost')) p.ghost = balls.filter(b => b !== cue && !b.potted && RULE.isOn && !RULE.isOn(b.n, game)).map(b => b.n);
+  }
+  return p;
+}
+// Try shot p silently (with the white moved to spot first, if given), then put everything back.
+// quick: stop just after the white reaches the target (only the object ball's direction is wanted).
+// Returns how good the outcome is for the computer (v), whether the target dropped, and the object ball's direction.
+function cpuSim(p, spot, lv, tgt, quick) {
+  const saved = balls.map(b => [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted]);
+  const savedShot = shot, savedFalling = falling, savedFx = shotFx;
+  const res = { v: -Infinity, potted: false, objAng: null, first: null, result: '' };
+  admin.sim = true; falling = [];
+  try {
+    if (spot) { cue.x = spot.x; cue.z = spot.z; }
+    shot = { number: 0, power: 0, firstHit: null, potted: [], cushions: 0, cushionAfterHit: false, cuePotted: false,
+             isBreak: game.isBreak, freeShot: game.freeShot, crossed: new Set(), cueFirst: 0 };
+    shotFx = makeFx(p);
+    launchCue(p);
+    let at = -1;
+    for (let i = 0; i < 15 / PHYS_H; i++) {
+      step(PHYS_H);
+      if (tgt && at < 0 && shot.firstHit !== null) at = i;
+      if (tgt && at >= 0 && i - at === 25) {   // a moment after contact: which way is the object ball going?
+        if (shot.firstHit === tgt.n && Math.hypot(tgt.vx, tgt.vz) > 0.005) res.objAng = Math.atan2(tgt.vz, tgt.vx);
+        if (quick) break;
+      }
+      if (quick && at < 0 && i * PHYS_H > 4) break;
+      if (i % 10 === 0 && !anyMoving()) break;
+    }
+    res.first = shot.firstHit;
+    if (quick) return res;
+    res.potted = !!(tgt && tgt.potted);
+    const s = { ...shot, potted: [...shot.potted], crossed: shot.crossed.size };
+    const g = { ...game, players: game.players.map(q => ({ ...q })) };
+    const v = RULE.judge(s, g);   // on a copy of the game: judge() decides groups by changing it
+    res.result = v.result;
+    res.v = cpuValue(v, s, g, lv);
+    return res;
+  } finally {
+    balls.forEach((b, i) => { [b.x, b.z, b.vx, b.vz, b.ux, b.uz, b.side, b.potted] = saved[i]; });
+    shot = savedShot; falling = savedFalling; shotFx = savedFx; admin.sim = false;
+  }
+}
+// How much the computer likes how a shot ended (the balls are still where it left them): winning the frame
+// beats everything, then a pot (more so with an easy next pot, on the levels that think about position),
+// then a safety that leaves the other player nothing easy; a foul or losing the frame comes last.
+function cpuValue(v, s, g, lv) {
+  const me = game.turn, r = v.result;
+  if (shotFx.retake && !['continue', 'win', 'rerack'].includes(r)) return -60;   // Retake: it would all go back anyway
+  if (r === 'win') return 10000;
+  if (r === 'lose') return -10000;
+  if (r === 'rerack') return 0;
+  if (r === 'foul') return -1800;
+  if (r === 'continue') return 1000 + 60 * s.potted.length + lv.pos * 600 * cpuEase(g, me);
+  if (game.extraVisit) return 300 + lv.pos * 300 * cpuEase(g, me);   // a miss, but it's still the second of two visits
+  return -600 * cpuEase(g, 1 - me);
+}
+// How the cue ball's angle moves the object ball's angle (just geometry, measured either side), so a try that
+// sends the object ball off line can be corrected in one go
+function cpuGain(cx, cz, ang, b) {
+  const phi = a => {
+    const dx = Math.cos(a), dz = Math.sin(a), fx = b.x - cx, fz = b.z - cz, rr = b.r + cue.r;
+    const t = fx * dx + fz * dz, off2 = fx * fx + fz * fz - t * t;
+    if (off2 > rr * rr) return null;
+    const k = t - Math.sqrt(rr * rr - off2);
+    return Math.atan2(b.z - (cz + dz * k), b.x - (cx + dx * k));
+  };
+  const a1 = phi(ang - 0.002), a2 = phi(ang + 0.002);
+  if (a1 === null || a2 === null) return null;
+  return Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1)) / 0.004;
+}
+// Aim for a pot: start at the ghost ball, then correct for throw and swerve from where the object ball really goes
+function* cpuAim(pr, spot, pw, sx, sy, lv) {
+  const cx = spot ? spot.x : cue.x, cz = spot ? spot.z : cue.z;
+  const want = pr.want;
+  let ang = pr.ang;
+  for (let k = 0; k < 2; k++) {
+    const r = cpuSim(cpuShot(ang, pw, sx, sy), spot, lv, pr.b, true);
+    yield;
+    if (r.first !== pr.b.n || r.objAng === null) return k ? ang : null;
+    const err = Math.atan2(Math.sin(want - r.objAng), Math.cos(want - r.objAng));
+    if (Math.abs(err) < 0.002) break;
+    const gain = cpuGain(cx, cz, ang, pr.b);
+    if (!gain || Math.abs(gain) < 1) break;
+    ang += Math.max(-0.03, Math.min(0.03, err / gain));
+  }
+  return ang;
+}
+
+// Where to put the white with ball in hand: behind the easy pots (straight on and a little either side, for
+// position), plus a spread of spots across the area it's allowed in. The best few by how easy they leave it.
+function cpuSpots(lv) {
+  const a = handArea(), others = balls.filter(b => b !== cue && !b.potted);
+  const fits = (x, z) => x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1 && others.every(b => Math.hypot(b.x - x, b.z - z) > b.r + cue.r + 0.003);
+  const on = cpuOn(game, game.turn), cands = [];
+  const rate = (x, z) => { let e = 0; for (const b of on) for (const q of POCKETS) { const p = cpuPair(x, z, b, q); if (p) e = Math.max(e, p.e); } return e; };
+  for (const b of on) for (const q of POCKETS) {
+    const tx = q.x - b.x, tz = q.z - b.z, td = Math.hypot(tx, tz), ux = tx / td, uz = tz / td;
+    const gx = b.x - ux * (b.r + cue.r), gz = b.z - uz * (b.r + cue.r);
+    for (const d of [0.1, 0.22, 0.4]) for (const rot of [0, -0.35, 0.35]) {
+      const c = Math.cos(rot), s = Math.sin(rot), x = gx - (ux * c - uz * s) * d, z = gz - (ux * s + uz * c) * d;
+      if (!fits(x, z)) continue;
+      const p = cpuPair(x, z, b, q);
+      if (p) cands.push({ x, z, e: p.e * (rot ? 0.97 : 1) });
+    }
+  }
+  for (let i = 0; i <= 6; i++) for (let j = 0; j <= 4; j++) {
+    const x = a.x0 + 0.01 + (a.x1 - a.x0 - 0.02) * i / 6, z = a.z0 + 0.01 + (a.z1 - a.z0 - 0.02) * j / 4;
+    if (fits(x, z)) cands.push({ x, z, e: rate(x, z) * 0.95 });
+  }
+  cands.sort((p, q) => q.e - p.e);
+  const out = game.ballInHand === 'baulk-optional' ? [null] : [];   // it may also be played from where it lies
+  for (const c of cands) {
+    if (out.length >= lv.spots) break;
+    if (out.every(o => !o || Math.hypot(o.x - c.x, o.z - c.z) > 0.06)) out.push({ x: c.x, z: c.z });
+  }
+  if (!out.length) { const q = freeSpot(Math.min(a.x1, cue.x), cue.z); out.push(q || null); }
+  return out;
+}
+
+// The break: from baulk, a little off centre, full ball on the front of the pack
+function cpuBreak(lv) {
+  let spot = null;
+  if (game.ballInHand) {
+    const a = handArea();
+    spot = freeSpot(Math.min(a.x1, baulkX()) - 0.06, (Math.random() - 0.5) * 0.25 * lv.breakSide);
+  }
+  const cx = spot ? spot.x : cue.x, cz = spot ? spot.z : cue.z;
+  const front = balls.filter(b => b !== cue && !b.potted).reduce((m, b) => !m || b.x < m.x ? b : m, null);
+  const ang = front ? Math.atan2(front.z - cz, front.x - cx) : 0;
+  return { p: cpuShot(ang, lv.breakPower, 0, 0.1), spot, v: 0 };
+}
+
+// The thinking itself. A generator, so it runs a slice at a time and the game keeps drawing smoothly; it keeps
+// its best idea so far in out.best, so it can be cut short.
+function* cpuPlan(lv, out) {
+  if (game.isBreak) { out.best = cpuBreak(lv); return; }
+  const spots = game.ballInHand ? cpuSpots(lv) : [null];
+  const tried = [];
+  const keep = (p, spot, r, pr) => {
+    const c = { p, spot, v: r.v, ev: r.v, pr, potted: r.potted };
+    tried.push(c);
+    if (!out.best || c.v > out.best.v) out.best = c;
+    return c;
+  };
+  // 1. The obvious pots: each spot, each likely ball and pocket, centre ball at a sensible weight
+  for (const spot of spots) {
+    const cx = spot ? spot.x : cue.x, cz = spot ? spot.z : cue.z;
+    for (const pr of cpuPairs(cx, cz).slice(0, lv.pairs)) {
+      const pw = cpuPower(pr);
+      const ang = yield* cpuAim(pr, spot, pw, 0, 0, lv);
+      if (ang === null) continue;
+      const p = cpuShot(ang, pw, 0, 0);
+      keep(p, spot, cpuSim(p, spot, lv, pr.b), { ...pr, spot, pw });
+      yield;
+    }
+  }
+  // 2. The best pots again with other weights and spin, for a better leave
+  if (lv.variants.length) {
+    const seeds = tried.filter(c => c.v >= 1000).sort((a, b) => b.v - a.v).slice(0, lv.seeds);
+    for (const sd of seeds) for (const [k, sx, sy] of lv.variants) {
+      const pw = Math.min(1, sd.pr.pw * k);
+      const ang = yield* cpuAim(sd.pr, sd.spot, pw, sx, sy, lv);
+      if (ang === null) continue;
+      keep(cpuShot(ang, pw, sx, sy), sd.spot, cpuSim(cpuShot(ang, pw, sx, sy), sd.spot, lv, sd.pr.b), sd.pr);
+      yield;
+    }
+  }
+  // 3. Safeties: when there's no pot it trusts, roll up to an on ball softly and leave the other player nothing
+  // How does it go if the cueing is a little off? Tries each idea again a touch either side and a touch
+  // harder and softer, and rates it on all five, so it prefers shots that still work. Best-looking first; it
+  // stops once nothing left could beat what it has. Ideas it never got round to checking count for less.
+  const robust = function* (list, budget) {
+    list = list.slice().sort((a, b) => b.v - a.v);
+    let top = -Infinity, n = 0;
+    for (const c of list) {
+      if (c.v <= top || n >= budget) { c.ev = Math.min(c.ev, c.v >= 1000 ? 0.6 * c.v : c.v - 300); continue; }
+      const a = Math.atan2(c.p.az, c.p.ax), vs = [];
+      for (const [d, k] of [[-lv.wobble, 1], [lv.wobble, 1], [0, 1 - lv.pow * 1.5 - 0.02], [0, 1 + lv.pow * 1.5 + 0.02]]) {
+        vs.push(cpuSim(cpuShot(a + d, c.p.power * k, c.p.sx, c.p.sy), c.spot, lv).v);
+        yield;
+      }
+      c.ev = 0.4 * c.v + 0.15 * (vs[0] + vs[1] + vs[2] + vs[3]);
+      top = Math.max(top, c.ev); n++;
+    }
+  };
+  const best = () => tried.reduce((m, c) => !m || c.ev > m.ev ? c : m, null);
+  if (lv.wobble) yield* robust(tried.filter(c => c.v >= 1000), lv.robust);
+  let top = best();
+  if (lv.safety && (!top || top.ev < 900)) {
+    const n0 = tried.length;
+    for (const spot of spots.slice(0, 2)) {
+      const cx = spot ? spot.x : cue.x, cz = spot ? spot.z : cue.z;
+      const on = cpuOn(game, game.turn).sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz)).slice(0, lv.safeBalls);
+      for (const b of on) for (const off of lv.safeCuts) for (const pw of lv.safePowers) {
+        const base = Math.atan2(b.z - cz, b.x - cx), d = Math.hypot(b.x - cx, b.z - cz), rr = b.r + cue.r;
+        const ang = base + Math.asin(Math.max(-1, Math.min(1, off * rr / Math.max(d, rr))));   // off: -1..1 of a full ball's width
+        keep(cpuShot(ang, pw, 0, 0), spot, cpuSim(cpuShot(ang, pw, 0, 0), spot, lv), null);
+        yield;
+      }
+    }
+    if (lv.wobble) yield* robust(tried.slice(n0), 6);
+    top = best();
+  }
+  // 4. Nothing legal yet (snookered): shots all round the clock, off the cushions too
+  if (!top || top.ev < -1000) {
+    for (let i = 0; i < lv.wide; i++) {
+      const spot = spots[i % spots.length];
+      const s = lv.spin ? [Math.random() * 1.2 - 0.6, Math.random() * 1.2 - 0.6] : [0, 0];
+      const p = cpuShot(Math.random() * Math.PI * 2, 0.25 + Math.random() * 0.6, s[0], s[1]);
+      keep(p, spot, cpuSim(p, spot, lv), null);
+      yield;
+    }
+  }
+  // The pick: the best on average. Easy sometimes settles for one of its next-best ideas.
+  const ranked = tried.slice().sort((a, b) => b.ev - a.ev);
+  let pick = ranked[0] || out.best;
+  if (lv.sloppy && ranked.length > 1 && Math.random() < lv.sloppy) {
+    const ok = ranked.slice(1, 4).filter(c => c.ev > -1000);
+    if (ok.length) pick = ok[Math.floor(Math.random() * ok.length)];
+  }
+  out.best = pick;
+}
+
+// Power-ups: the computer switches its attack one on as its visit starts (not the Wall, which it doesn't place,
+// nor Ball in Hand or Ghost White on the break), and plays its defence one a moment into your visit.
+// Easy and Medium don't always bother.
+function cpuUse(i, wall) { cpu.acting = true; try { usePowerup(i, wall); } finally { cpu.acting = false; } }
+function cpuAttack(lv) {
+  const i = game.turn, u = game.pu[i], key = game.puSeed + ':' + game.visit + ':' + i;
+  if (!RULE.powerups || !u || u.used || cpu.attKey === key) return false;
+  cpu.attKey = key;
+  if (POWERUPS[u.id].place || (game.isBreak && (u.id === 'hand' || u.id === 'ghost')) || Math.random() >= lv.usePU) return false;
+  cpuUse(i);
+  return true;
+}
+function cpuDefence(now) {
+  const i = 1 - game.turn, lv = cpuAt(i), u = game.pu[i];
+  if (!lv || !RULE.powerups || game.over || state !== 'aim' || !u || u.used || POWERUPS[u.id].kind !== 'def') return;
+  const key = game.puSeed + ':' + game.visit + ':' + game.turn;
+  if (cpu.defKey !== key) { cpu.defKey = key; cpu.defAt = now + 900 + Math.random() * 900; cpu.defWill = Math.random() < lv.usePU; }
+  if (!cpu.defWill || now < cpu.defAt || pendingView || gesture || placing || (stroke.on && !cpu.stroking)) return;
+  cpu.defWill = false;
+  let wall;
+  if (POWERUPS[u.id].place && !(wall = cpuWallSpot())) return;
+  cpuUse(i, wall);
+}
+// Where to drop a defence wall: across the shooter's easiest pot (between the ball and the pocket, or else in
+// the white's path to it), or failing that somewhere between the white and a ball they need
+function cpuWallSpot() {
+  const tries = [];
+  const pr = cpuPairs(cue.x, cue.z)[0];
+  if (pr) {
+    const gx = cue.x + Math.cos(pr.ang) * pr.ad, gz = cue.z + Math.sin(pr.ang) * pr.ad, la = Math.atan2(pr.q.z - pr.b.z, pr.q.x - pr.b.x);
+    for (const t of [0.5, 0.35, 0.65, 0.8]) tries.push([pr.b.x + (pr.q.x - pr.b.x) * t, pr.b.z + (pr.q.z - pr.b.z) * t, la + Math.PI / 2]);
+    for (const t of [0.5, 0.35, 0.65]) tries.push([cue.x + (gx - cue.x) * t, cue.z + (gz - cue.z) * t, pr.ang + Math.PI / 2]);
+  }
+  for (const b of cpuOn(game, game.turn)) for (const t of [0.5, 0.3, 0.7]) tries.push([cue.x + (b.x - cue.x) * t, cue.z + (b.z - cue.z) * t, Math.atan2(b.z - cue.z, b.x - cue.x) + Math.PI / 2]);
+  for (const [x, z, a] of tries) { const w = wallFrom(x, z, a); if (wallFits(w)) return w; }
+  return null;
+}
+
+// Play the chosen shot like a person would: put the white down (ball in hand), turn the cue onto the line,
+// a couple of practice strokes, a slow draw back, a pause, then through. The cueing has the level's error in it.
+function cpuPlay(c, lv) {
+  const ang = Math.atan2(c.p.az, c.p.ax) + gauss() * lv.aim;
+  const pw = Math.max(0.05, Math.min(1, c.p.power * (1 + gauss() * lv.pow)));
+  const wob = c.p.sx || c.p.sy ? lv.spinErr : lv.spinErr * 0.3;
+  const sx = c.p.sx + gauss() * wob, sy = c.p.sy + gauss() * wob;
+  if (c.spot && game.ballInHand) { cue.x = c.spot.x; cue.z = c.spot.z; }   // the white glides over (see updateHand)
+  const key = cpuKey();
+  const a0 = Math.atan2(aim.z, aim.x), da = Math.atan2(Math.sin(ang - a0), Math.cos(ang - a0));
+  const sx0 = spin.x, sy0 = spin.y, feather = Math.min(0.07, pw * 0.4);
+  const setPow = v => { power = v; updatePower(); };
+  const lineUp = () => { aim = { x: Math.cos(ang), z: Math.sin(ang) }; setSpin(sx, sy); };
+  cpu.phase = 'play'; cpu.stroking = true;
+  runStroke([
+    { dur: c.spot ? 750 : 200, fn: () => {} },                                                       // white down, settle
+    { dur: 450 + Math.abs(da) * 450, fn: k => { const a = a0 + da * k; aim = { x: Math.cos(a), z: Math.sin(a) }; setSpin(sx0 + (sx - sx0) * k, sy0 + (sy - sy0) * k); } },
+    { dur: 330, fn: k => setPow(feather * k) }, { dur: 330, fn: k => setPow(feather * (1 - k)) },   // practice strokes
+    { dur: 330, fn: k => setPow(feather * k) }, { dur: 330, fn: k => setPow(feather * (1 - k)) },
+    { dur: 250, fn: () => {} },
+    { dur: 800 + pw * 800, fn: k => setPow(pw * k) },                                                // slow draw back
+    { dur: 350, fn: () => {} },                                                                     // pause
+  ], () => {
+    lineUp();
+    strokeThrough(pw, () => {
+      cpu.stroking = false; cpu.phase = '';
+      lineUp(); power = pw;
+      shoot();
+      chasing = false; frozen = false;   // no chase cam for the computer's shots: the camera stays overhead
+    });
+  }, () => cpuKey() !== key || !cpuAt(game.turn) || state !== 'aim' || game.over || wallPick.i >= 0);   // (you're placing a defence wall: it waits)
+}
+
+// Runs every frame: starts the computer's turn once the camera has settled overhead, thinks in short slices,
+// waits a natural moment, then plays. Anything that changes the table meanwhile makes it think again.
+function cpuTick(now) {
+  requestAnimationFrame(cpuTick);
+  if (cpu.stroking && !stroke.on) { cpu.stroking = false; cpu.phase = ''; cpu.key = ''; }   // the stroke was called off
+  cpuDefence(now);
+  const lv = cpuAt(game.turn);
+  const ready = lv && state === 'aim' && !game.over && !pendingView && camBlend === 0 && wallPick.i < 0 && !placing
+    && document.getElementById('matchCard').hidden && !admin.moving && !finder.run;
+  if (!ready || cpu.stroking || stroke.on) { if (!ready && !cpu.stroking) { cpu.phase = ''; cpu.run = null; cpu.key = ''; } return; }
+  const key = cpuKey();
+  if (key !== cpu.key) { cpu.key = key; cpu.phase = 'wait'; cpu.t0 = now; cpu.run = null; }
+  if (cpu.phase === 'wait') {
+    if (now - cpu.t0 < 450) return;
+    if (cpuAttack(lv)) return;   // the table's changed (power-up on), so it starts again with it
+    cpu.out = { best: null }; cpu.run = cpuPlan(lv, cpu.out); cpu.phase = 'think'; cpu.tThink = now;
+  }
+  if (cpu.phase === 'think') {
+    const until = performance.now() + 14;
+    let done = false;
+    while (performance.now() < until) if (cpu.run.next().done) { done = true; break; }
+    if (!done && now - cpu.tThink < 10000) return;   // never thinks longer than 10 s: it plays its best idea so far
+    cpu.phase = 'ready'; cpu.run = null;
+  }
+  if (cpu.phase === 'ready' && now - cpu.t0 >= lv.think) {
+    if (cpu.out.best) cpuPlay(cpu.out.best, lv);
+    else cpu.key = '';   // nothing at all (can't happen: it always tries something), so think again
+  }
+}
+requestAnimationFrame(cpuTick);
 
 useTable(startKey);
 requestAnimationFrame(frame);
