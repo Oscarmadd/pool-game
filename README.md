@@ -21,3 +21,7 @@ Pick these from the **Rules** menu:
 - **Free play**: no rules, just practice.
 
 Online play (peer to peer, through PeerJS) is under the **Online** button.
+
+## Playing the computer
+
+Open **Match** and set either player to **CPU easy**, **CPU medium** or **CPU hard**. It takes effect straight away and is remembered in this browser. The computer plays every rule set except Free play, including ball in hand, safeties, match play and the power-ups mode. It's for games on one screen only, not online. The code is in section 11 of `index.html`, and the levels are in `CPU_LEVELS`.
