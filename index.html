@@ -63,6 +63,32 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .card p{margin:0 0 10px;color:var(--dim)}
 .card .score{font:600 20px "Barlow Condensed",sans-serif;color:var(--ink);margin-bottom:18px}
 #nextBtn{border-color:var(--brass);color:var(--brass)}
+/* Match scoreboard (top of the banner) and the match set-up card */
+#score{display:flex;align-items:center;justify-content:center;gap:10px;font:700 17px/1.2 "Barlow Condensed",sans-serif;color:var(--dim);padding-bottom:4px;margin-bottom:3px;border-bottom:1px solid var(--line)}
+#score[hidden]{display:none}
+#score .sc{display:flex;flex-direction:column;align-items:center}
+#score .nm{max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#score .nm.on{color:var(--ink)}
+#score b{font-size:24px;line-height:1;color:var(--brass);font-variant-numeric:tabular-nums;min-width:1ch;text-align:center}
+#score .bo{font:500 12px/1.2 Barlow,sans-serif;color:var(--dim);text-align:center;white-space:nowrap}
+#score .dots{display:flex;gap:3px;justify-content:center;margin-top:2px}
+#score .dots i{width:7px;height:7px;border-radius:50%;border:1px solid #5a5047}
+#score .dots i.w{background:var(--brass);border-color:var(--brass)}
+.card .hist{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:-8px 0 16px;font:500 13px Barlow,sans-serif;color:var(--dim)}
+.card .hist span{padding:2px 8px;border:1px solid var(--line);border-radius:10px}
+#matchCard{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,8,7,.6);z-index:5}
+#matchCard[hidden],#matchCard [hidden]{display:none}
+#matchCard .card{display:flex;flex-direction:column;gap:10px;align-items:stretch;text-align:left;max-width:min(400px,92%)}
+#matchCard h2{margin:0;text-align:center}
+#matchCard p{margin:0}
+#matchCard label{font-size:13px;color:var(--dim);margin-bottom:-6px}
+#matchCard input{font:500 17px Barlow,sans-serif;color:var(--ink);background:#0f0d0b;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 12px;width:100%}
+#matchCard input:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+#matchCard input[disabled]{opacity:.6}
+#matchCard .seg{display:flex;gap:6px}#matchCard .seg button{flex:1;padding:0 6px}
+#matchCard .seg button[disabled]{opacity:.45;cursor:default}
+#matchCard .small{font-size:13px;color:var(--dim)}
+#matchStart{border-color:var(--brass);color:var(--brass);margin-top:4px}
 #report.foul strong{color:#ef8a6d}
 #players{display:flex;gap:8px;flex-wrap:wrap}
 #players[hidden]{display:none}
@@ -120,7 +146,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #admin .note{font-size:12px;color:var(--dim);margin:0}
 #admin [disabled]{opacity:.45;cursor:default}
 .vol{display:flex;align-items:center;gap:8px}#volSlider{width:90px;accent-color:var(--brass);cursor:pointer}
-@media(max-width:1100px){h1 span{display:none}}
+@media(max-width:1360px){h1 span{display:none}}
 @media(max-width:940px){.sel span{display:none}}
 @media(max-width:600px){#volSlider{width:64px}h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
 
@@ -135,10 +161,11 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <button id="viewBtn" aria-pressed="false" title="Look down on the whole table without shooting (T)">Overview</button>
   <span class="vol"><button id="soundBtn" aria-pressed="true" title="Sound on/off">Sound</button><input id="volSlider" type="range" min="0" max="100" step="1" aria-label="Volume" title="Volume"></span>
   <button id="onlineBtn" aria-pressed="false" title="Play a friend over the internet">Online</button>
+  <button id="matchBtn" title="Player names, how many frames, and a fresh match">Match</button>
   <button id="rackBtn">Re-rack</button>
 </header>
 <div id="stage">
-  <div id="banner"><b id="turnText">Player 1 to break</b><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
+  <div id="banner"><div id="score" hidden></div><b id="turnText">Player 1 to break</b><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
   <div id="spinBox" hidden>
     <div id="spinBall" role="slider" tabindex="0" aria-label="Where to hit the cue ball (W A S D to move, X to centre)"><i id="spinDot"></i></div>
     <span id="spinLabel">Centre</span>
@@ -191,7 +218,17 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     </section>
     <section><h3>Readout</h3><pre id="admRead"></pre></section>
   </div>
-  <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><button id="nextBtn">Next frame</button></div></div>
+  <div id="over" hidden><div class="card"><h2 id="overTitle">Player 1 wins</h2><p id="overWhy"></p><p id="overScore" class="score"></p><div id="overHist" class="hist"></div><button id="nextBtn">Next frame</button></div></div>
+  <div id="matchCard" hidden><div class="card" role="dialog" aria-labelledby="matchTitle">
+    <h2 id="matchTitle">Match</h2>
+    <label for="mName0">Player 1</label><input id="mName0" maxlength="16" autocomplete="off" placeholder="Player 1">
+    <label for="mName1">Player 2</label><input id="mName1" maxlength="16" autocomplete="off" placeholder="Player 2">
+    <label>Length</label>
+    <div class="seg" id="mBest" role="group" aria-label="Match length"><button data-n="3">Best of 3</button><button data-n="5">Best of 5</button><button data-n="7">Best of 7</button><button data-n="0">No limit</button></div>
+    <p class="small" id="matchNote"></p>
+    <button id="matchStart">Start new match</button>
+    <button id="matchClose">Close</button>
+  </div></div>
 </div>
 <footer>
   <div class="power"><b>Power</b><div class="meter"><i id="powerFill"></i></div><b id="powerPct">0%</b></div>
@@ -419,7 +456,32 @@ const game = {
   players: [{ name: 'Player 1', group: null, frames: 0 }, { name: 'Player 2', group: null, frames: 0 }],
   turn: 0, breaker: 0, isBreak: true, freeShot: false, ballInHand: null, over: false,
   extraVisit: false,   // after a foul: the incoming player still has their second visit to come
+  // The match: best of 3/5/7 frames (0 = no limit), who won each frame so far, and whether it's been won
+  bestOf: 0, history: [], matchOver: false,
 };
+const framesToWin = () => game.bestOf ? Math.ceil(game.bestOf / 2) : 0;
+// Match details that travel with every sync, admin change and undo
+const matchState = () => ({ bestOf: game.bestOf, history: [...game.history], matchOver: game.matchOver });
+function takeMatch(g) {
+  game.bestOf = [3, 5, 7].includes(g.bestOf) ? g.bestOf : 0;
+  game.history = Array.isArray(g.history) ? g.history.map(w => w ? 1 : 0) : [];
+  game.matchOver = !!g.matchOver;
+}
+// Fresh match with the same names and length: scores back to 0, then a new frame
+function newMatch(breaker) {
+  for (const p of game.players) p.frames = 0;
+  game.history = []; game.matchOver = false;
+  newFrame(breaker);
+}
+try {   // names and match length from last time, for local play
+  const m = JSON.parse(localStorage.getItem('pool-match') || 'null');
+  if (m) { takeMatch(m); game.history = []; game.matchOver = false;
+           (m.names || []).forEach((n, i) => { if (i < 2 && typeof n === 'string' && n) game.players[i].name = n.replace(/[<>&"'`]/g, '').slice(0, 16); }); }
+} catch (e) {}
+function saveMatch() {
+  if (net.on) return;   // online names come from the online card, so keep the local ones as they were
+  try { localStorage.setItem('pool-match', JSON.stringify({ bestOf: game.bestOf, names: game.players.map(p => p.name) })); } catch (e) {}
+}
 
 // Online play (see section 9). me = which player this browser is (0 = host, 1 = guest).
 // When online, only the player whose turn it is can aim, move the white or shoot.
@@ -456,11 +518,15 @@ function applyVerdict(v) {
   if (v.result === 'win' || v.result === 'lose') {
     const winner = v.result === 'win' ? me : them;
     winner.frames++;
+    game.history.push(game.players.indexOf(winner));
+    game.matchOver = !!framesToWin() && winner.frames >= framesToWin();
     game.over = true;
     game.extraVisit = false;
-    document.getElementById('overTitle').textContent = winner.name + ' wins the frame';
+    const [a, b] = game.players, fr = game.history.length;
+    document.getElementById('overTitle').textContent = winner.name + (game.matchOver ? ' wins the match' : ' wins frame ' + fr);
     document.getElementById('overWhy').textContent = (v.result === 'win' ? '' : me.name + ' loses: ') + v.msg;
-    document.getElementById('overScore').textContent = game.players.map(p => p.name + ' ' + p.frames).join('  ·  ');
+    document.getElementById('overScore').textContent = a.name + '  ' + a.frames + ' – ' + b.frames + '  ' + b.name
+      + (game.matchOver || !game.bestOf ? '' : '  ·  first to ' + framesToWin());
     document.getElementById('over').hidden = false;
     pendingView = 'top';
     setReport('<strong>' + v.msg + '</strong>');
@@ -499,9 +565,10 @@ function updateUI() {
       const sw = g ? `style="background:${g === 'A' ? RED : YELLOW}"` : '';
       const left = g ? (ballsLeft(g) ? ballsLeft(g) + ' left' : 'on the black') : 'open';
       const you = net.on && i === net.me ? ' <span class="you">you</span>' : '';
-      return `<div class="pl${i === game.turn && !game.over ? ' on' : ''}"><i ${sw}></i>${p.name}${you} <small>${left}</small> <span class="fr">${p.frames}</span></div>`;
+      return `<div class="pl${i === game.turn && !game.over ? ' on' : ''}"><i ${sw}></i>${p.name}${you} <small>${left}</small></div>`;
     }).join('');
   }
+  drawScore();
   let t;
   if (!RULE.groupNames) t = 'Free play';
   else if (game.over) t = 'Frame over';
@@ -522,6 +589,7 @@ function updateUI() {
   // Online: only the host can change the table, the rules or re-rack (it resets the frame for both of you)
   const hostOnly = net.on && (!net.host || state === 'moving');
   for (const id of ['rackBtn', 'rulesSel', 'tableSel']) document.getElementById(id).disabled = hostOnly;
+  document.getElementById('matchBtn').disabled = state === 'moving' || !RULE.groupNames;
   if (net.on && !myTurn()) {
     const them = game.players[game.turn].name;
     h.hidden = game.over || !net.connected;
@@ -532,6 +600,24 @@ function updateUI() {
       ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
       : 'Drag the white to place it' + (game.ballInHand === 'baulk' ? ' behind the baulk line' : '') + ' · press anywhere else to get down on the shot';
   else h.hidden = true;
+}
+
+// The scoreboard: names, frames won, the match length, and a dot for each frame
+function drawScore() {
+  const el = document.getElementById('score');
+  el.hidden = !RULE.groupNames;
+  if (el.hidden) return;
+  const [a, b] = game.players, need = framesToWin();
+  const dots = i => need ? `<span class="dots">${Array.from({ length: need }, (_, k) => `<i${k < game.players[i].frames ? ' class="w"' : ''}></i>`).join('')}</span>` : '';
+  const nm = i => `<span class="nm${i === game.turn && !game.over ? ' on' : ''}">${game.players[i].name}</span>`;
+  const mid = game.matchOver ? 'Match over' : 'Frame ' + (game.history.length + (game.over ? 0 : 1)) + (game.bestOf ? ' · best of ' + game.bestOf : '');
+  el.innerHTML = `${nm(0)}<span class="sc"><b>${a.frames}</b>${dots(0)}</span><span class="bo">${mid}</span><span class="sc"><b>${b.frames}</b>${dots(1)}</span>${nm(1)}`;
+  // On the frame-over card: who won each frame so far, and the right button
+  document.getElementById('overHist').innerHTML = game.history.length > 1
+    ? game.history.map((w, k) => `<span>${k + 1}: ${game.players[w].name}</span>`).join('') : '';
+  const nb = document.getElementById('nextBtn');
+  nb.textContent = game.matchOver ? 'New match' : 'Next frame';
+  nb.disabled = net.on && !net.connected;
 }
 
 // Physics tuning – play with these to change the feel
@@ -2055,7 +2141,7 @@ function fullState() {
   const rep = netEl('report');
   return { t: 'sync', seq: net.seq, rules: rulesSel.value, table: tableKey, shotCount, balls: ballState(),
            game: { turn: game.turn, breaker: game.breaker, isBreak: game.isBreak, freeShot: game.freeShot, extraVisit: game.extraVisit,
-                   ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })) },
+                   ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })), ...matchState() },
            over, report: rep.innerHTML, foul: rep.classList.contains('foul') };
 }
 function netSend(msg) {
@@ -2117,6 +2203,7 @@ function applySync(s) {
   const g = s.game;
   Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players = g.players.map((p, i) => ({ name: cleanName(p.name, 'Player ' + (i + 1)), group: p.group, frames: p.frames | 0 }));
+  takeMatch(g);
   net.seq = s.seq;
   if (s.over) {
     netEl('overTitle').textContent = s.over.title; netEl('overWhy').textContent = s.over.why; netEl('overScore').textContent = s.over.score;
@@ -2141,8 +2228,7 @@ function onData(m) {
           net.started = true;
           game.players[0].name = cleanName(netEl('netName').value, 'Player 1');
           game.players[1].name = net.friend;
-          for (const p of game.players) p.frames = 0;
-          newFrame(0);
+          newMatch(0);
           netHostReset();
         } else if (m.seq < 0 && net.watch) {
           // They reloaded in the middle of their own shot, so it's gone from their side. The copy we're
@@ -2185,8 +2271,8 @@ function onData(m) {
         if (net.watch) { net.watch.result = m; net.watch.at = performance.now(); }
         else applyResult(m);
         break;
-      case 'next':   // the guest pressed Next frame
-        if (net.host && game.over) { newFrame(1 - game.breaker); netHostReset(); }
+      case 'next':   // the guest pressed Next frame (or New match once it's been won)
+        if (net.host && game.over) { (game.matchOver ? newMatch : newFrame)(1 - game.breaker); netHostReset(); }
         break;
       case 'bye': dropped(true); break;
     }
@@ -2434,13 +2520,57 @@ RULE = RULESETS[rulesKey];
 rulesSel.addEventListener('change', () => {
   RULE = RULESETS[rulesSel.value];
   for (const p of game.players) p.frames = 0;
+  game.history = []; game.matchOver = false;
   try { localStorage.setItem('pool-rules', rulesSel.value); } catch (e) {}
   useTable(tableSel.value);
 });
 document.getElementById('nextBtn').addEventListener('click', () => {
   // Online the host starts the next frame for both of you; the guest's button asks the host to
   if (net.on && !net.host) { netSend({ t: 'next' }); return; }
-  newFrame(1 - game.breaker); netHostReset();
+  (game.matchOver ? newMatch : newFrame)(1 - game.breaker); netHostReset();
+});
+
+// ---- Match set-up card: names (local play) and best of 3 / 5 / 7 ----
+const matchEl = id => document.getElementById(id);
+let matchPick = 0;
+function matchCardRefresh() {
+  const guest = net.on && !net.host;
+  for (const i of [0, 1]) {
+    const inp = matchEl('mName' + i);
+    if (document.activeElement !== inp) inp.value = game.players[i].name;
+    inp.disabled = net.on;   // online, names come from the online card
+  }
+  for (const b of matchEl('mBest').children) { b.setAttribute('aria-pressed', +b.dataset.n === matchPick); b.disabled = guest; }
+  matchEl('matchStart').hidden = guest;
+  matchEl('matchNote').textContent = guest ? 'Your friend is hosting, so they set up the match.'
+    : (net.on ? 'Names come from the online card. ' : '') + 'Starting a new match sets the score back to 0–0 and re-racks'
+      + (net.on ? ' for both of you.' : '.');
+}
+function matchOpen(on) {
+  matchEl('matchCard').hidden = !on;
+  if (on) { matchPick = game.bestOf; matchCardRefresh(); }
+}
+matchEl('matchBtn').addEventListener('click', () => matchOpen(matchEl('matchCard').hidden));
+matchEl('matchClose').addEventListener('click', () => matchOpen(false));
+matchEl('mBest').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled) return;
+  matchPick = +b.dataset.n; matchCardRefresh();
+});
+for (const i of [0, 1]) matchEl('mName' + i).addEventListener('input', e => {
+  if (net.on) return;
+  game.players[i].name = cleanName(e.target.value, 'Player ' + (i + 1));
+  saveMatch(); updateUI();
+});
+matchEl('matchStart').addEventListener('click', () => {
+  if (net.on && !net.host) return;
+  if (state === 'moving') return;
+  game.bestOf = matchPick;
+  saveMatch();
+  matchOpen(false);
+  newMatch(0);
+  setReport('<strong>New match' + (game.bestOf ? ', best of ' + game.bestOf : '') + '.</strong> ' + game.players[0].name + ' to break.');
+  netHostReset();
 });
 
 // ================================================================
@@ -2500,6 +2630,7 @@ function applyAdmin(m) {
   const g = m.game;
   Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players.forEach((p, i) => { p.group = g.players[i].group; p.frames = g.players[i].frames | 0; });
+  takeMatch(g);
   net.seq = m.seq;
   if (m.over) { netEl('overTitle').textContent = m.over.title; netEl('overWhy').textContent = m.over.why; netEl('overScore').textContent = m.over.score; }
   netEl('over').hidden = !g.over;
@@ -2621,7 +2752,7 @@ el.addEventListener('pointercancel', adminDrop, true);
 function adminSnapshot() {
   const r = admEl('report');
   admin.snap = { balls: ballState(), shotCount, aim: { ...aim },
-    game: { ...game, players: game.players.map(p => ({ ...p })) }, report: r.innerHTML, foul: r.classList.contains('foul') };
+    game: { ...game, players: game.players.map(p => ({ ...p })), history: [...game.history] }, report: r.innerHTML, foul: r.classList.contains('foul') };
 }
 admEl('admUndo').addEventListener('click', () => {
   const s = admin.snap;
@@ -2631,7 +2762,7 @@ admEl('admUndo').addEventListener('click', () => {
   applyBalls(s.balls);
   for (const b of balls) { b.mesh.visible = !b.potted; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
   shotCount = s.shotCount; aim = { ...s.aim };
-  Object.assign(game, s.game, { players: s.game.players.map(p => ({ ...p })) });
+  Object.assign(game, s.game, { players: s.game.players.map(p => ({ ...p })), history: [...s.game.history] });
   admEl('over').hidden = !game.over;
   setReport(s.report, s.foul);
   pendingView = null; view = game.ballInHand && game.ballInHand !== 'baulk-optional' ? 'top' : 'cue';
