@@ -1618,7 +1618,8 @@ el.addEventListener('pointermove', e => {
   if (view !== 'top' || camBlend > 0 || looking) return;
   const p = tablePoint(e); if (!p) return;
   if (placing) { placeCue(p); return; }
-  el.style.cursor = canPlace() && Math.hypot(p.x - cue.x, p.z - cue.z) < cue.r * 2.5 ? 'grab' : '';
+  hand.hover = canPlace() && nearCue(e);
+  el.style.cursor = hand.hover ? 'grab' : '';
 });
 
 el.addEventListener('pointerdown', () => audioInit(), true);
@@ -1626,9 +1627,11 @@ el.addEventListener('pointerdown', e => {
   if (state !== 'aim' || game.over || pendingView || looking || !myTurn()) return;
   if (view === 'top') {
     const p = tablePoint(e);
-    // Ball in hand: grabbing the white moves it
-    if (p && canPlace() && Math.hypot(p.x - cue.x, p.z - cue.z) < cue.r * 2.5) {
+    // Ball in hand: grabbing the white (or near it: fingers are big) moves it. It keeps the same
+    // offset from the pointer as when you picked it up, so it never jumps under your finger.
+    if (p && canPlace() && nearCue(e)) {
       placing = true; el.style.cursor = 'grabbing';
+      hand.dx = cue.x - p.x; hand.dz = cue.z - p.z;
       el.setPointerCapture(e.pointerId);
       placeCue(p);
       return;
@@ -1643,7 +1646,7 @@ el.addEventListener('pointerdown', e => {
 });
 
 const release = () => {
-  if (placing) { placing = false; el.style.cursor = ''; return; }
+  if (placing) { placing = false; hand.ghost = null; el.style.cursor = ''; return; }
   if (!gesture) return;
   const take = gesture.mode === 'power' && power > 0.02;
   gesture = null;
@@ -1651,7 +1654,7 @@ const release = () => {
   else { power = 0; updatePower(); }
 };
 el.addEventListener('pointerup', release);
-el.addEventListener('pointercancel', () => { placing = false; gesture = null; power = 0; updatePower(); });
+el.addEventListener('pointercancel', () => { placing = false; hand.ghost = null; gesture = null; power = 0; updatePower(); });
 
 function setView(v) {
   view = v;
@@ -1698,15 +1701,124 @@ spinBall.addEventListener('dblclick', () => setSpin(0, 0));
 
 // Ball in hand is allowed on the break and after most fouls (in baulk); free play lets you move it anywhere, any time
 const canPlace = () => !!game.ballInHand;
-function placeCue(p) {
+// hand: the ball-in-hand drag. dx/dz = offset from the pointer to the white when it was picked up,
+// ghost = where the pointer is asking for (shown faintly when the white can't go exactly there),
+// hover = the pointer is over the white (it glows a little brighter).
+const hand = { dx: 0, dz: 0, ghost: null, hover: false };
+// Is the pointer close enough on screen to pick up the white? Measured in pixels so it's as easy on a
+// small phone as on a big monitor, and a bit more forgiving for a finger than for a mouse.
+const cueScreen = new THREE.Vector3();
+function nearCue(e) {
+  const r = el.getBoundingClientRect();
+  cueScreen.set(cue.x, cue.r, cue.z).project(camera);
+  const sx = r.left + (cueScreen.x + 1) / 2 * r.width, sy = r.top + (1 - cueScreen.y) / 2 * r.height;
+  // the white's own size on screen, so a zoomed-in view still works
+  cueScreen.set(cue.x + cue.r, cue.r, cue.z).project(camera);
+  const rad = Math.abs(cueScreen.x - (2 * (sx - r.left) / r.width - 1)) / 2 * r.width;
+  return Math.hypot(e.clientX - sx, e.clientY - sy) < Math.max(rad * 2.5, e.pointerType === 'touch' ? 44 : 26);
+}
+// The part of the bed the white may go in: behind the baulk line, or anywhere
+function handArea() {
   const r = cue.r;
-  const maxX = game.ballInHand === 'anywhere' ? HX - r : baulkX();
-  const x = Math.max(-HX + r, Math.min(maxX, p.x));
-  const z = Math.max(-HZ + r, Math.min(HZ - r, p.z));
-  // don't let it sit on top of another ball
-  if (balls.some(b => b !== cue && !b.potted && Math.hypot(b.x - x, b.z - z) < b.r + r)) return;
-  cue.x = x; cue.z = z;
-  cue.mesh.position.set(x, r, z);
+  return { x0: -HX + r, x1: game.ballInHand === 'anywhere' ? HX - r : baulkX(), z0: -HZ + r, z1: HZ - r };
+}
+// Nearest legal spot to (x, z): inside the area and not touching another ball. Overlaps are pushed
+// straight out from the ball in the way, so the white slides round balls instead of sticking.
+// Returns null only if there's no room anywhere near (then the white stays where it was).
+function freeSpot(x, z) {
+  const r = cue.r, a = handArea(), gap = 0.0003;
+  const others = balls.filter(b => b !== cue && !b.potted);
+  const clamp = q => { q.x = Math.max(a.x0, Math.min(a.x1, q.x)); q.z = Math.max(a.z0, Math.min(a.z1, q.z)); return q; };
+  const clash = q => others.find(b => Math.hypot(b.x - q.x, b.z - q.z) < b.r + r);
+  const q = clamp({ x, z });
+  for (let i = 0; i < 12 && clash(q); i++) {
+    for (const b of others) {
+      const dx = q.x - b.x, dz = q.z - b.z, d = Math.hypot(dx, dz), need = b.r + r + gap;
+      if (d >= need) continue;
+      if (d < 1e-6) { q.x = b.x - need; continue; }   // dead on top of it: go back towards the baulk end
+      q.x = b.x + dx / d * need; q.z = b.z + dz / d * need;
+    }
+    clamp(q);
+  }
+  if (!clash(q)) return q;
+  // Stuck in a gap that's too small (between balls and a cushion): look round in widening rings
+  for (let ring = 1; ring <= 24; ring++) {
+    const rad = ring * r * 0.5;
+    let best = null, bd = Infinity;
+    for (let k = 0; k < 16; k++) {
+      const t = k / 16 * Math.PI * 2, c = clamp({ x: x + Math.cos(t) * rad, z: z + Math.sin(t) * rad });
+      if (clash(c)) continue;
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d < bd) { bd = d; best = c; }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+function placeCue(p) {
+  const want = { x: p.x + hand.dx, z: p.z + hand.dz };
+  const q = freeSpot(want.x, want.z);
+  if (!q) return;
+  cue.x = q.x; cue.z = q.z;
+  // the ghost shows where you're pointing when the white has had to stop short or slide round a ball
+  hand.ghost = Math.hypot(want.x - q.x, want.z - q.z) > cue.r * 0.6 ? want : null;
+}
+
+// ---- Ball-in-hand visuals: the area the white may go in, a ring round the white, and the ghost ----
+// The white's mesh glides after cue.x/z (and rolls as it goes), so dragging it, and watching your
+// friend drag it online (their position arrives 15 times a second), both look smooth.
+const handGlow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+handGlow.rotation.x = -Math.PI / 2; handGlow.renderOrder = 1; scene.add(handGlow);
+const handEdge = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+handEdge.rotation.x = -Math.PI / 2; handEdge.renderOrder = 1; scene.add(handEdge);
+const handRing = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.55, 40),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+handRing.rotation.x = -Math.PI / 2; handRing.renderOrder = 1; scene.add(handRing);
+const handGhost = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28, depthWrite: false }));
+handGhost.renderOrder = 2; scene.add(handGhost);
+let handFade = 0;
+const handAxis = new THREE.Vector3(), handQ = new THREE.Quaternion();
+function updateHand(dt) {
+  const on = !!game.ballInHand && state === 'aim' && !game.over && !cue.potted && view === 'top' && !looking && !pendingView;
+  handFade += Math.sign((on ? 1 : 0) - handFade) * Math.min(Math.abs((on ? 1 : 0) - handFade), dt * 5);
+  if (game.ballInHand && state === 'aim' && !cue.potted) {
+    // glide the white's mesh to its spot (quick, so it never feels laggy), rolling it as it moves
+    const m = cue.mesh.position, dx = cue.x - m.x, dz = cue.z - m.z, d = Math.hypot(dx, dz);
+    if (d > 1e-5) {
+      const k = d > 0.5 ? 1 : 1 - Math.exp(-dt * (placing ? 30 : 14));
+      const mx = dx * k, mz = dz * k;
+      handAxis.set(mz, 0, -mx).normalize();
+      handQ.setFromAxisAngle(handAxis, Math.hypot(mx, mz) / cue.r);
+      cue.mesh.quaternion.premultiply(handQ);
+      m.set(m.x + mx, cue.r, m.z + mz);
+    }
+  }
+  const vis = handFade > 0.001;
+  handGlow.visible = handEdge.visible = handRing.visible = vis;
+  handGhost.visible = vis && placing && !!hand.ghost;
+  if (!vis) return;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 420);
+  // Allowed area: a light wash over the part of the bed you can use (just the baulk end, or all of it)
+  const a = handArea(), x0 = a.x0 - cue.r, x1 = a.x1 + (game.ballInHand === 'anywhere' ? cue.r : 0);
+  handGlow.scale.set(x1 - x0, 2 * HZ, 1);
+  handGlow.position.set((x0 + x1) / 2, 0.0006, 0);
+  handGlow.material.opacity = handFade * (placing ? 0.11 : 0.06 + 0.03 * pulse);
+  // and a brighter edge along the baulk line, so it's clear where the white has to stay behind
+  handEdge.visible = game.ballInHand !== 'anywhere';
+  handEdge.scale.set(0.006, 2 * HZ, 1);
+  handEdge.position.set(baulkX(), 0.0007, 0);
+  handEdge.material.opacity = handFade * (placing ? 0.6 : 0.3 + 0.25 * pulse);
+  // A ring on the cloth round the white: "pick me up". Brighter when you're on it or holding it.
+  handRing.scale.setScalar(cue.r);
+  handRing.position.set(cue.mesh.position.x, 0.0008, cue.mesh.position.z);
+  handRing.material.opacity = handFade * (placing ? 0.85 : hand.hover ? 0.7 : 0.3 + 0.35 * pulse);
+  if (handGhost.visible) {
+    handGhost.scale.setScalar(cue.r);
+    handGhost.position.set(hand.ghost.x, cue.r, hand.ghost.z);
+  }
 }
 
 addEventListener('keydown', () => audioInit(), true);
@@ -2382,6 +2494,7 @@ function frame(now) {
   updateRack(dt);
   updateAimVisuals();
   updateCamera(dt);
+  updateHand(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -2549,7 +2662,7 @@ function onData(m) {
       case 'aim':    // the other player lining up: move their cue (and the white, with ball in hand)
         if (myTurn() || state !== 'aim') break;
         aim = { x: m.ax, z: m.az }; power = m.power; updatePower(); setSpin(m.sx, m.sy);
-        if (game.ballInHand && !cue.potted) { cue.x = m.cx; cue.z = m.cz; cue.mesh.position.set(cue.x, cue.r, cue.z); }
+        if (game.ballInHand && !cue.potted) { cue.x = m.cx; cue.z = m.cz; }   // the mesh glides there (updateHand)
         break;
       case 'shot':   // they've hit it: play the same shot on our table
         if (m.base !== net.seq || myTurn()) break;
