@@ -1818,9 +1818,11 @@ function updateCuePose() {
   const back = 0.62, ahead = 0.9;
   // and if the cue is jacked up over a rail or a ball, rise gently so we stay above it rather than inside it
   // The player can also lift or lower their eye line a little (viewLift, see below): that only moves the
-  // camera, never the aim or the shot, and the rise over a jacked-up cue still wins if it needs to be higher.
-  const eye = 0.16 + viewLift * (viewLift > 0 ? VIEW_UP : VIEW_DOWN);
-  const height = Math.max(eye, cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05);
+  // camera, never the aim or the shot. It's added on top of the rise over a jacked-up cue, so raising the
+  // view always responds straight away; lowering it never takes the camera below what the cue needs.
+  const clear = cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05;
+  const base = Math.max(0.16, clear);
+  const height = Math.max(clear, base + viewLift * (viewLift > 0 ? VIEW_UP : VIEW_DOWN));
   cuePose.pos.set(cue.x - aim.x * back, cue.r + height, cue.z - aim.z * back);
   cuePose.look.set(cue.x + aim.x * ahead, 0, cue.z + aim.z * ahead);
   cuePose.fov = camera.aspect < 0.9 ? 64 : 50;   // a bit wider on a phone
