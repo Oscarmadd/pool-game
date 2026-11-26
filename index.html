@@ -154,6 +154,27 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #admRead{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);background:#0f0d0b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;margin:0}
 #admin .note{font-size:12px;color:var(--dim);margin:0}
 #admin [disabled]{opacity:.45;cursor:default}
+/* Power-ups mode: each player's power-up card (bottom middle of the table) and the active-effects line */
+#puBox{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:8px;align-items:stretch;max-width:calc(100% - 300px);z-index:2}
+#puBox[hidden]{display:none}
+.pu{display:flex;align-items:center;gap:9px;padding:7px 9px 7px 8px;border-radius:10px;background:rgba(18,16,14,.88);border:1px solid rgba(255,255,255,.14);min-width:0;width:240px}
+.pu.att{--k:#e0a04a}.pu.def{--k:#6fa8dc}
+.pu .ic{flex:0 0 auto;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--k);color:var(--k)}
+.pu .ic svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pu .tx{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.15}
+.pu .tx small{font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--k);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pu .tx b{font:700 17px/1.1 "Barlow Condensed",sans-serif;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pu .tx em{font:400 12px/1.25 Barlow,sans-serif;font-style:normal;color:var(--dim)}
+.pu button{flex:0 0 auto;min-height:36px;padding:0 12px;border-color:var(--k);color:var(--k);font-size:15px}
+.pu .st{flex:0 0 auto;font:600 12px "Barlow Condensed",sans-serif;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.pu.live{border-color:var(--k);box-shadow:0 0 0 1px var(--k),0 0 14px color-mix(in srgb,var(--k) 45%,transparent)}
+.pu.live .st{color:var(--k)}
+.pu.spent{opacity:.5}
+#fxLine{font:600 13px "Barlow Condensed",sans-serif;letter-spacing:.03em;color:var(--ink)}
+#fxLine[hidden]{display:none}
+#fxLine .a{color:#e0a04a}#fxLine .d{color:#6fa8dc}
+@media(max-width:900px){.pu .tx em{display:none}.pu{width:200px}}
+@media(max-width:600px){#puBox{flex-direction:column;bottom:10px;max-width:calc(100% - 190px);gap:5px}.pu{width:auto;padding:5px 7px;gap:6px}.pu .ic{width:26px;height:26px}.pu .ic svg{width:16px;height:16px}.pu .tx b{font-size:15px}.pu button{min-height:32px;padding:0 9px}}
 .vol{display:flex;align-items:center;gap:8px}#volSlider{width:90px;accent-color:var(--brass);cursor:pointer}
 @media(max-width:1360px){h1 span{display:none}}
 @media(max-width:940px){.sel span{display:none}}
@@ -174,7 +195,8 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <button id="rackBtn">Re-rack</button>
 </header>
 <div id="stage">
-  <div id="banner"><div id="score" hidden></div><b id="turnText">Player 1 to break</b><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
+  <div id="banner"><div id="score" hidden></div><b id="turnText">Player 1 to break</b><span id="fxLine" hidden></span><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
+  <div id="puBox" hidden aria-label="Power-ups"></div>
   <div id="spinBox" hidden>
     <div id="spinBall" role="slider" tabindex="0" aria-label="Where to hit the cue ball (W A S D to move, X to centre)"><i id="spinDot"></i></div>
     <span id="spinLabel">Centre</span>
@@ -348,9 +370,15 @@ function applySpec(key) {
   const cornerX = (longCornerB[0] + shortB[0]) / 2, cornerZ = (longCornerB[1] + shortB[1]) / 2;
   const cornerR = Math.hypot(longCornerB[0] - shortB[0], longCornerB[1] - shortB[1]) / 2;
   for (const sx of [-1, 1]) for (const sz of [-1, 1])
-    POCKETS.push({ x: sx * cornerX, z: sz * cornerZ, r: cornerR, drop: cornerR - 0.0005, capture: cornerR * 0.85 });
+    POCKETS.push({ x: sx * cornerX, z: sz * cornerZ, r: cornerR, drop: cornerR - 0.0005, capture: cornerR * 0.85,
+                   jaws: [[sx * longCornerN[0], sz * longCornerN[1]], [sx * shortN[0], sz * shortN[1]]] });
   for (const sz of [-1, 1])
-    POCKETS.push({ x: 0, z: sz * longSideB[1], r: longSideB[0], drop: longSideB[0] - 0.0005, capture: longSideB[0] * 0.85 });
+    POCKETS.push({ x: 0, z: sz * longSideB[1], r: longSideB[0], drop: longSideB[0] - 0.0005, capture: longSideB[0] * 0.85,
+                   jaws: [[hs, sz * HZ], [-hs, sz * HZ]] });   // jaws = the two cushion noses either side of the mouth
+  for (const p of POCKETS) {   // the middle of the mouth (between the two jaws) and half its width
+    p.mx = (p.jaws[0][0] + p.jaws[1][0]) / 2; p.mz = (p.jaws[0][1] + p.jaws[1][1]) / 2;
+    p.half = Math.hypot(p.jaws[0][0] - p.jaws[1][0], p.jaws[0][1] - p.jaws[1][1]) / 2;
+  }
 
   tablePlane.constant = -R;
 }
@@ -464,7 +492,85 @@ const RULESETS = {
     },
   },
 };
+// Blackball + power-ups: the same rules, but at the start of every visit both players are dealt a power-up.
+// The player at the table gets an attack one, the other player a defence one. Either has to be used before
+// the shot is struck (see section 1c).
+RULESETS.powerups = { ...RULESETS.blackball, name: 'Blackball + power-ups', powerups: true };
 let RULE = RULESETS.blackball;
+
+// ================================================================
+// 1c. POWER-UPS (the "Blackball + power-ups" rules)
+// ================================================================
+// Every visit, both players get a fresh power-up, picked from a seed the host sets at the start of each frame,
+// so both tables deal the same ones. What's held and what's switched on travel with every sync as well.
+// A power-up is switched on while the shooter is lining up; the shot then carries the list (p.fx), and both
+// tables play the shot with the same effects. Unused power-ups are lost when the next visit starts.
+//   att = for the player at the table, on their own shot      def = for the other player, against that shot
+const PU_ICON = {
+  hand: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4M10 4.5l2-2 2 2M10 19.5l2 2 2-2M4.5 10l-2 2 2 2M19.5 10l2 2-2 2"/>',
+  bucket: '<path d="M3.5 8h17l-2.5 11.5h-12z"/><path d="M7 8a5 5 0 0 1 10 0"/>',
+  ghost: '<circle cx="12" cy="12" r="8" stroke-dasharray="3 2.6"/><circle cx="12" cy="12" r="2.5"/>',
+  retake: '<path d="M5 13a7 7 0 1 0 2.2-6.1"/><path d="M5 3.5V8h4.5"/>',
+  chalk: '<path d="M5 8.5 12 5l7 3.5v7.5L12 19.5 5 16z"/><path d="M5 8.5l7 3.5 7-3.5M12 12v7.5"/>',
+  tight: '<circle cx="12" cy="12" r="3"/><path d="M2.5 12h5M16.5 12h5M5.5 9.5 8 12l-2.5 2.5M18.5 9.5 16 12l2.5 2.5"/>',
+  cloth: '<path d="M3 8c3-3 6 3 9 0s6 3 9 0M3 13c3-3 6 3 9 0s6 3 9 0M3 18c3-3 6 3 9 0s6 3 9 0"/>',
+  dead: '<path d="M3 20h18"/><circle cx="12" cy="15" r="4"/><path d="M5 5l4 4M19 5l-4 4"/>',
+  blunt: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><path d="M6.3 6.3l11.4 11.4"/>',
+  short: '<path d="M4 20 15 9"/><path d="M15 9l2-2"/><path d="M14 4l6 6"/>',
+  wall: '<rect x="3" y="9" width="18" height="6" rx="1"/><path d="M9 9v6M15 9v6"/>',
+};
+PU_ICON.block = PU_ICON.wall;
+const POWERUPS = {
+  hand:   { kind: 'att', name: 'Ball in Hand',   text: 'Put the white anywhere on the table for this shot.' },
+  bucket: { kind: 'att', name: 'Bucket Pockets', text: 'The pockets swallow balls more easily on this shot.' },
+  ghost:  { kind: 'att', name: 'Ghost White',    text: "The white passes straight through any ball that isn't on for you." },
+  retake: { kind: 'att', name: 'Retake',         text: 'Foul, or nothing goes in? Every ball goes back and you shoot again.' },
+  chalk:  { kind: 'att', name: 'Power Chalk',    text: 'Up to 35% more power, and no chance of a miscue.' },
+  wall:   { kind: 'att', name: 'Wall',           text: 'Drop a short wall anywhere on the cloth for this shot. Balls bounce off it.', place: true },
+  tight:  { kind: 'def', name: 'Tight Pockets',  text: 'The pockets get narrower for their shot.' },
+  cloth:  { kind: 'def', name: 'Thick Cloth',    text: 'The balls slow down much sooner on their shot.' },
+  dead:   { kind: 'def', name: 'Dead Cushions',  text: 'The cushions lose most of their bounce on their shot.' },
+  blunt:  { kind: 'def', name: 'Blunt Tip',      text: 'They can only hit the middle of the white: no spin.' },
+  short:  { kind: 'def', name: 'Short Cue',      text: 'Their power is capped at 55%.' },
+  block:  { kind: 'def', name: 'Wall',           text: 'Drop a short wall anywhere on the cloth for their shot. Balls bounce off it.', place: true },
+};
+const PU_ATT = Object.keys(POWERUPS).filter(k => POWERUPS[k].kind === 'att');
+const PU_DEF = Object.keys(POWERUPS).filter(k => POWERUPS[k].kind === 'def');
+// How much each effect changes the physics
+const PU_BUCKET = 0;     // Bucket Pockets: a ball also drops once its centre is within half the mouth (+ this many ball radii) of the mouth middle: about twice as wide
+const PU_TIGHT = 0.05;  // Tight Pockets: a stub on each jaw (this many ball radii long, plus its thickness): about 40% narrower corners
+const PU_CLOTH = 2.4;                              // rolling drag x this
+const PU_DEAD = 0.55;                              // cushion bounce x this
+const PU_CHALK = 1.35, PU_SHORT = 0.55;            // power x this / power capped at this
+const WALL_T = 0.007;                              // a wall's half-thickness (m); its length is WALL_LEN()
+const WALL_LEN = () => 7 * R;                      // about three and a half balls long
+const puHash = key => {   // FNV-1a, 0..1
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) / 4294967296;
+};
+const clonePU = pu => Array.isArray(pu) ? pu.map(u => u && POWERUPS[u.id] ? { id: u.id, used: !!u.used } : null) : [null, null];
+const cleanFx = fx => Array.isArray(fx) ? fx.filter(id => POWERUPS[id]) : [];
+// Walls: [{ x1, z1, x2, z2 }], kept to numbers only (they can arrive from the other browser)
+const cleanWalls = w => Array.isArray(w) ? w.slice(0, 2).map(q => q && ({ x1: +q.x1 || 0, z1: +q.z1 || 0, x2: +q.x2 || 0, z2: +q.z2 || 0 })).filter(Boolean) : [];
+// A new visit: both players get a fresh one (never the same one twice running)
+function dealPowerups() {
+  game.fx = []; game.walls = [];
+  if (!RULE.powerups || game.over) { game.pu = [null, null]; return; }
+  game.visit++;
+  game.pu = [0, 1].map(i => {
+    const list = i === game.turn ? PU_ATT : PU_DEF;
+    let k = Math.floor(puHash(game.puSeed + ':' + game.visit + ':' + i) * list.length);
+    if (game.pu[i] && list[k] === game.pu[i].id) k = (k + 1) % list.length;
+    return { id: list[k], used: false };
+  });
+}
+// The power-up details that travel with every sync, admin change and undo
+const puState = () => ({ pu: clonePU(game.pu), fx: [...game.fx], walls: cleanWalls(game.walls), puSeed: game.puSeed, visit: game.visit });
+function takePU(g) {
+  game.pu = clonePU(g.pu); game.fx = cleanFx(g.fx); game.walls = cleanWalls(g.walls);
+  game.puSeed = g.puSeed | 0; game.visit = g.visit | 0;
+}
 
 // Everything about the frame that isn't ball positions
 const game = {
@@ -473,6 +579,9 @@ const game = {
   extraVisit: false,   // after a foul: the incoming player still has their second visit to come
   // The match: best of 3/5/7 frames (0 = no limit), who won each frame so far, and whether it's been won
   bestOf: 0, history: [], matchOver: false,
+  // Power-ups mode: what each player holds this visit ({ id, used } or null), what's switched on for the
+  // coming shot, the frame's dealing seed and a count of visits (the seed + count pick the next ones)
+  pu: [null, null], fx: [], walls: [], puSeed: 0, visit: 0,
 };
 const framesToWin = () => game.bestOf ? Math.ceil(game.bestOf / 2) : 0;
 // Match details that travel with every sync, admin change and undo
@@ -511,6 +620,8 @@ function newFrame(breaker) {
   game.isBreak = true; game.freeShot = false; game.extraVisit = false; game.over = false;
   for (const p of game.players) p.group = null;
   game.ballInHand = RULE.baulk ? 'baulk' : 'anywhere';
+  game.puSeed = Math.floor(Math.random() * 1e9); game.visit = 0; game.pu = [null, null];
+  dealPowerups();
   document.getElementById('over').hidden = true;
   pendingView = 'top';   // start each frame overhead so you can place the white for the break
   rack();
@@ -521,6 +632,8 @@ function newFrame(breaker) {
 // Act on what the rules engine decided
 function applyVerdict(v) {
   const me = game.players[game.turn], them = game.players[1 - game.turn];
+  // Power-ups: Retake put every ball back where it was, so nothing else changes
+  if (v.result === 'retake') { setReport(v.msg); pendingView = nextView(); updateUI(); return; }
   game.isBreak = false;
   game.freeShot = false;
   game.ballInHand = null;
@@ -537,6 +650,7 @@ function applyVerdict(v) {
     game.matchOver = !!framesToWin() && winner.frames >= framesToWin();
     game.over = true;
     game.extraVisit = false;
+    game.pu = [null, null]; game.fx = []; game.walls = [];
     const [a, b] = game.players, fr = game.history.length;
     document.getElementById('overTitle').textContent = winner.name + (game.matchOver ? ' wins the match' : ' wins frame ' + fr);
     document.getElementById('overWhy').textContent = (v.result === 'win' ? '' : me.name + ' loses: ') + v.msg;
@@ -563,6 +677,8 @@ function applyVerdict(v) {
     if (v.result === 'switch') game.turn = 1 - game.turn;
     setReport(v.msg);
   }
+  if (v.result === 'continue') { game.fx = []; game.walls = []; }
+  else dealPowerups();   // a new visit (or the second of two): fresh power-ups all round
   // Next view: overhead only if the white has to be placed (or it's your friend's turn online). If moving
   // it is optional (it can be played from where it lies) stay down on the shot; V still pops up to move it.
   pendingView = nextView();
@@ -596,7 +712,8 @@ function updateUI() {
   document.getElementById('turnText').innerHTML = t;
   const h = document.getElementById('hint');
   const v = typeof view === 'undefined' ? 'top' : view;
-  document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && myTurn());
+  document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && myTurn()) || game.fx.includes('blunt');
+  drawPU();
   document.getElementById('tiltBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && !(typeof looking !== 'undefined' && looking));
   h.hidden = state !== 'aim' || game.over;
   const vb = document.getElementById('viewBtn'), look = typeof looking !== 'undefined' && looking;
@@ -992,7 +1109,7 @@ function step(h) {
     } else {
       // ROLLING: spin matches movement, and a small rolling drag slows it gently to a stop
       const speed = Math.hypot(b.vx, b.vz);
-      const newSpeed = Math.max(0, speed - T.roll * G * h);   // T.roll = the table's cloth drag (bigger = balls stop sooner)
+      const newSpeed = Math.max(0, speed - T.roll * shotFx.roll * G * h);   // T.roll = the table's cloth drag (bigger = balls stop sooner)
       const k = speed > 0 ? newSpeed / speed : 0;
       b.vx *= k; b.vz *= k; b.ux = b.vx; b.uz = b.vz;
     }
@@ -1007,6 +1124,7 @@ function step(h) {
       const dx = b.x - a.x, dz = b.z - a.z, d2 = dx * dx + dz * dz;
       const touch = a.r + b.r;
       if (d2 >= touch * touch || d2 === 0) continue;
+      if (shotFx.ghost && (a === cue ? shotFx.ghost.has(b.n) : b === cue && shotFx.ghost.has(a.n))) continue;   // Ghost White
       // Fast balls can sink into each other by several millimetres within one small step, which would
       // put the line of centres in the wrong place and spoil the cut angle. So wind both balls back to the
       // exact moment they touched (solve |gap + relative speed x time| = touch), bounce them there, then
@@ -1061,8 +1179,22 @@ function step(h) {
         sfxThud(-into, b.x, b.z, b);
       }
     }
+    // Power-up walls: a thin bar standing on the cloth. Balls bounce off it like a cushion (it doesn't
+    // count as a cushion for the rules)
+    for (const w of shotFx.walls) {
+      const ex = w.x2 - w.x1, ez = w.z2 - w.z1;
+      const t = Math.max(0, Math.min(1, ((b.x - w.x1) * ex + (b.z - w.z1) * ez) / (ex * ex + ez * ez)));
+      const cx = w.x1 + ex * t, cz = w.z1 + ez * t;
+      const dx = b.x - cx, dz = b.z - cz, d = Math.hypot(dx, dz), reach = b.r + WALL_T;
+      if (d >= reach || d === 0) continue;
+      const nx = dx / d, nz = dz / d;
+      b.x = cx + nx * reach; b.z = cz + nz * reach;
+      const into = b.vx * nx + b.vz * nz;
+      if (into < 0) { bounceOffCushion(b, nx, nz, into); sfxThud(-into, b.x, b.z, b); }
+    }
     // Pockets: once the centre is close enough to a pocket centre, the ball falls in
-    const dropped = POCKETS.some(p => Math.hypot(b.x - p.x, b.z - p.z) < p.capture)
+    const dropped = POCKETS.some(p => Math.hypot(b.x - p.x, b.z - p.z) < p.capture
+        || shotFx.bucket && Math.hypot(b.x - p.mx, b.z - p.mz) < p.half + PU_BUCKET * b.r)   // Bucket Pockets
       || Math.abs(b.x) > CA + 0.05 || Math.abs(b.z) > CB + 0.05;   // safety net: anything that escapes counts as potted
     if (dropped) potBall(b);
   }
@@ -1123,7 +1255,7 @@ function bounceOffCushion(b, nx, nz, into) {
     wx += (ry * Pz - rz * Py) / I; wy += (rz * Px - rx * Pz) / I; wz += (rx * Py - ry * Px) / I;
   };
   // 1. The bounce: straight back out of the cushion, harder hits lose more
-  const e = Math.max(CUSHION_MIN_BOUNCE, CUSHION_BOUNCE - CUSHION_SOFTEN * -into);
+  const e = Math.max(CUSHION_MIN_BOUNCE, CUSHION_BOUNCE - CUSHION_SOFTEN * -into) * shotFx.cushion;
   const Pn = (1 + e) * m * -into;
   applyAt(Pn * nx, 0, Pn * nz);
   // 2. Friction: how fast is the ball's surface sliding across the rubber (along the cushion and up/down)?
@@ -1177,6 +1309,14 @@ function shoot() {
   // Everything the shot depends on. Online, this is sent to the other player so their table plays it too.
   // ps = the admin panel's max power setting; it's sent with the shot so your friend's table plays it the same
   const p = { ax: aim.x, az: aim.z, power, sx: spin.x, sy: spin.y, ps: admin.powerScale, brk: game.isBreak ? 1 : 0 };
+  // Power-ups switched on for this shot travel with it, so both tables play it the same way
+  if (game.fx.length) {
+    p.fx = [...game.fx];
+    if (p.fx.includes('blunt')) p.sx = p.sy = 0;
+    if (p.fx.includes('short')) p.power = Math.min(p.power, PU_SHORT);
+    if (game.walls.length) p.walls = cleanWalls(game.walls);
+    if (p.fx.includes('ghost')) p.ghost = balls.filter(b => b !== cue && !b.potted && RULE.isOn && !RULE.isOn(b.n, game)).map(b => b.n);
+  }
   netSendShot(p);
   strike(p);
   frozen = true; startChase();
@@ -1194,6 +1334,8 @@ function strike(p) {
   else sfxStrike(p.power * (p.ps > 0 ? Math.min(2, p.ps) : 1), cue.x, cue.z, p.brk !== undefined ? p.brk : game.isBreak);
   chalkPuff(p, mis);
   showLastShot(p, mis);
+  shotFx = makeFx(p); game.fx = []; game.walls = [];
+  shotStart = ballState();   // Retake puts everything back here
   launchCue(p);
   // Everything the rules need to know about this shot gets recorded in here as it plays out
   seedAim(p);   // decides where the cue points for the next shot
@@ -1208,6 +1350,7 @@ function strike(p) {
 // It builds with how far out and how hard, up to a 35% chance right at the edge at full power.
 // The dice roll comes from the shot itself (like seedAim), so both tables online agree without sending it.
 function miscueRisk(p) {
+  if (p.fx && p.fx.includes('chalk')) return 0;   // Power Chalk: no miscues
   const out = Math.min(1, Math.max(0, (Math.hypot(p.sx, p.sy) - 0.9) / 0.1));
   const hard = Math.min(1, Math.max(0, (p.power - 0.6) / 0.4));
   return out * hard * 0.35;
@@ -1224,7 +1367,8 @@ function isMiscue(p) {
 // Set the white moving for shot p (also used by the admin panel's shot finder to try shots out)
 function launchCue(p) {
   const brk = p.brk !== undefined ? p.brk : game.isBreak;   // a break? (sent with the shot so both tables agree)
-  const speed = (0.25 + Math.pow(p.power, 1.3) * MAX_SPEED * (p.ps > 0 ? Math.min(2, p.ps) : 1))   // curve gives finer control on soft shots
+  const fx = p.fx || [], pw = fx.includes('short') ? Math.min(p.power, PU_SHORT) : p.power;
+  const speed = (0.25 + Math.pow(pw, 1.3) * MAX_SPEED * (p.ps > 0 ? Math.min(2, p.ps) : 1) * (fx.includes('chalk') ? PU_CHALK : 1))   // curve gives finer control on soft shots
     * (brk ? BREAK_BOOST : 1) * (isMiscue(p) ? 0.35 : 1);
   // Where the tip hits the white, as a fraction of its radius (sx = right of centre, sy = above centre)
   let tipX = p.sx * MAX_TIP, tipY = p.sy * MAX_TIP, sq = -tipX * SQUIRT / MAX_TIP;
@@ -1250,12 +1394,168 @@ function launchCue(p) {
   cue.ux += -dz * sw; cue.uz += dx * sw;
 }
 
+// ---- Power-ups during a shot ----
+// shotFx = the effects playing out on the shot that's running (neutral between shots, so the admin
+// panel's shot finder and everything else see a normal table)
+const NO_FX = { ids: [], bucket: false, roll: 1, cushion: 1, ghost: null, retake: false, walls: [] };
+let shotFx = NO_FX, shotStart = null;
+function makeFx(p) {
+  const ids = cleanFx(p.fx);
+  if (!ids.length) return NO_FX;
+  return { ids, bucket: ids.includes('bucket'), roll: ids.includes('cloth') ? PU_CLOTH : 1,
+           cushion: ids.includes('dead') ? PU_DEAD : 1, ghost: ids.includes('ghost') ? new Set(p.ghost || []) : null,
+           retake: ids.includes('retake'), walls: cleanWalls(p.walls).concat(ids.includes('tight') ? jawWalls() : []) };
+}
+// Tight Pockets: a short stub on the end of each jaw, reaching into the pocket mouth (marked pin: drawn red)
+function jawWalls() {
+  return POCKETS.flatMap(p => p.jaws.map((j, k) => {
+    const o = p.jaws[1 - k], dx = o[0] - j[0], dz = o[1] - j[1], d = Math.hypot(dx, dz), in_ = PU_TIGHT * R;
+    return { x1: j[0], z1: j[1], x2: j[0] + dx / d * in_, z2: j[1] + dz / d * in_, pin: true };
+  }));
+}
+// The white stopped inside a ball (Ghost White): slide it to the nearest clear spot
+function unstickCue() {
+  if (cue.potted || !balls.some(b => b !== cue && !b.potted && Math.hypot(b.x - cue.x, b.z - cue.z) < b.r + cue.r)) return;
+  const was = game.ballInHand;
+  game.ballInHand = 'anywhere';   // freeSpot keeps it inside the area ball in hand allows
+  const q = freeSpot(cue.x, cue.z);
+  game.ballInHand = was;
+  if (q) { cue.x = q.x; cue.z = q.z; syncMeshes(); }
+}
+// Retake: every ball back where it was when the shot was struck
+function restoreShotStart() {
+  falling = falling.filter(f => !shotStart.some(([n, , , p]) => !p && n === f.b.n));
+  applyBalls(shotStart);
+  potCount = balls.reduce((m, b) => b.potted ? Math.max(m, b.potIdx || 0) : m, 0);
+  for (const b of balls) if (!b.potted) { b.mesh.visible = true; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
+}
+
+// Can player i switch their power-up on right now? Attack ones on your own shot, defence ones on theirs,
+// and only while the shooter is still lining up.
+function puCanUse(i) {
+  const u = game.pu[i];
+  if (!RULE.powerups || !u || u.used || game.over || state !== 'aim' || net.watch) return false;
+  if (net.on && (!net.connected || i !== net.me)) return false;
+  return (POWERUPS[u.id].kind === 'att') === (i === game.turn);
+}
+function usePowerup(i, wall) {
+  if (!puCanUse(i)) return;
+  const id = game.pu[i].id;
+  if (POWERUPS[id].place && !wall) return startWall(i);   // a wall: place it on the table first
+  applyPowerup(i, id, wall);
+  netSend({ t: 'pu', base: net.seq, who: i, id, wall });
+}
+function applyPowerup(i, id, wall) {
+  const u = POWERUPS[id];
+  if (u.place) { const w = cleanWalls([wall])[0]; if (!w || !wallFits(w)) return; game.walls.push(w); }
+  game.pu[i].used = true;
+  if (!game.fx.includes(id)) game.fx.push(id);
+  if (id === 'hand') {
+    if (cue.potted) respawnCue();
+    game.ballInHand = 'anywhere';
+    // the shooter goes up to the overhead view to place it, the same as after a foul
+    if (myTurn() && i === game.turn && view === 'cue') { looking = false; gesture = null; power = 0; updatePower(); setView('top'); }
+  }
+  if (id === 'blunt') setSpin(0, 0);
+  if (id === 'short' && power > PU_SHORT) { power = PU_SHORT; updatePower(); }
+  const who = net.on && i === net.me ? 'You' : game.players[i].name;
+  setReport('<strong>' + who + ' used ' + u.name + '.</strong> ' + u.text);
+  updateUI();
+}
+
+// The two power-up cards (bottom middle) and the "switched on" line in the banner
+const puBox = document.getElementById('puBox'), fxLine = document.getElementById('fxLine');
+let puKey = '';
+function drawPU() {
+  const on = !!RULE.powerups && !game.over;
+  const ids = state === 'moving' ? shotFx.ids : game.fx;
+  const fxTxt = on && ids.length ? 'On this shot: ' + ids.map(id => `<span class="${POWERUPS[id].kind === 'att' ? 'a' : 'd'}">${POWERUPS[id].name}</span>`).join(' · ') : '';
+  // the shooter's card first locally; your own card first online
+  const order = net.on ? [net.me, 1 - net.me] : [game.turn, 1 - game.turn];
+  const key = [on, fxTxt, state, game.turn, net.on, net.me, net.connected, !!net.watch, wallPick.i, JSON.stringify(game.pu)].join('|');
+  if (key === puKey) return;
+  puKey = key;
+  fxLine.hidden = !fxTxt; fxLine.innerHTML = fxTxt;
+  puBox.hidden = !on || !game.pu.some(Boolean);
+  if (puBox.hidden) return;
+  puBox.innerHTML = order.map(i => {
+    const u = game.pu[i];
+    if (!u) return '';
+    const P = POWERUPS[u.id], live = u.used && ids.includes(u.id);
+    const who = net.on ? (i === net.me ? 'You' : game.players[i].name) : game.players[i].name;
+    const btn = wallPick.i === i ? `<button data-cancel="1">Cancel</button>` : puCanUse(i) ? `<button data-pu="${i}" title="${P.name}: ${P.text} (${!net.on && i !== game.turn ? 'E' : 'Q'})">Use</button>` : '';
+    const st = btn ? '' : live ? 'On' : u.used ? 'Used' : P.kind === 'att' ? (i === game.turn ? '' : 'Next visit') : (i === game.turn ? '' : 'On their shot');
+    return `<div class="pu ${P.kind}${live ? ' live' : u.used ? ' spent' : ''}" title="${P.text}">
+      <span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true">${PU_ICON[u.id]}</svg></span>
+      <span class="tx"><small>${who} · ${P.kind === 'att' ? 'attack' : 'defence'}</small><b>${P.name}</b><em>${P.text}</em></span>
+      ${btn || (st ? `<span class="st">${st}</span>` : '')}</div>`;
+  }).join('');
+}
+puBox.addEventListener('click', e => {
+  if (e.target.closest('button[data-cancel]')) { endWall(); setReport('Wall put away.'); return; }
+  const b = e.target.closest('button[data-pu]');
+  if (b && wallPick.i < 0) { audioInit(); usePowerup(+b.dataset.pu); }
+});
+puBox.addEventListener('pointerdown', e => e.stopPropagation());
+// Q uses your power-up (playing on one screen: Q for the player at the table, E for the other player)
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('select, input, #netCard, #admin')) return;
+  const k = e.key.toLowerCase();
+  if (!RULE.powerups || e.repeat || (k !== 'q' && k !== 'e')) return;
+  if (net.on) { if (k === 'q') usePowerup(net.me); }
+  else usePowerup(k === 'q' ? game.turn : 1 - game.turn);
+});
+// Anything that ends the chance to use a power-up (the shot, a sync) also ends placing a wall
+const wallCheck = () => { if (wallPick.i >= 0 && !puCanUse(wallPick.i)) endWall(); };
+
+// Effects you can see on the table: pocket rings (bigger or tighter), a greyer cloth, darker cushions, a see-through white
+const fxRingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthTest: false, depthWrite: false });
+let fxRings = [], fxRingsFor = null;
+const feltBase = new THREE.Color(), cushionBase = new THREE.Color();
+let fxLook = { cloth: 0, dead: 0, ghost: 0, pocket: 0 };
+function updateFxVisuals(dt) {
+  if (!cue) return;
+  wallCheck(); updateWalls();
+  const ids = state === 'moving' ? shotFx.ids : RULE.powerups ? game.fx : [];
+  const bucket = ids.includes('bucket');
+  if (fxRingsFor !== POCKETS) {   // a new table: new rings
+    for (const r of fxRings) scene.remove(r);
+    fxRings = POCKETS.map(p => {
+      const rad = p.half + PU_BUCKET * R;   // Bucket Pockets: a ball whose centre gets inside this ring drops
+      const m = new THREE.Mesh(new THREE.RingGeometry(rad - 0.0025, rad + 0.0025, 48), fxRingMat);
+      m.rotation.x = -Math.PI / 2; m.position.set(p.mx, 0.002, p.mz); m.renderOrder = 5; m.visible = false;
+      scene.add(m); return m;
+    });
+    fxRingsFor = POCKETS;
+    feltBase.copy(feltMat.color); cushionBase.copy(cushionMat.color);
+  }
+  const k = Math.min(1, dt * 4), to = (a, b) => a + (b - a) * k;
+  fxLook.pocket = to(fxLook.pocket, bucket ? 1 : 0);
+  fxRingMat.color.set(0x7be08c);
+  fxRingMat.opacity = 0.8 * fxLook.pocket;
+  for (const r of fxRings) r.visible = fxLook.pocket > 0.01;
+  fxLook.cloth = to(fxLook.cloth, ids.includes('cloth') ? 1 : 0);
+  feltMat.color.copy(feltBase).lerp(new THREE.Color(0x8f8a70), 0.45 * fxLook.cloth);
+  fxLook.dead = to(fxLook.dead, ids.includes('dead') ? 1 : 0);
+  cushionMat.color.copy(cushionBase).multiplyScalar(1 - 0.55 * fxLook.dead);
+  fxLook.ghost = to(fxLook.ghost, ids.includes('ghost') ? 1 : 0);
+  const cm = cue.mesh.material, op = 1 - 0.55 * fxLook.ghost;
+  if (cm.opacity !== op) { cm.transparent = op < 1; cm.opacity = op; cm.depthWrite = op > 0.99; }
+}
+
 function finishShot() {
   for (const b of balls) { b.vx = b.vz = b.ux = b.uz = b.side = 0; }
   state = 'aim';
   shot.crossed = shot.crossed.size;
+  if (shotFx.ghost) unstickCue();   // Ghost White can leave the white resting inside a ball it passed through
+  let v = RULE.judge(shot, game);   // the rules engine decides what happens next
+  // Retake: a foul, a miss or a lost frame is undone, and the same player shoots again from the same table
+  if (shotFx.retake && shotStart && !['continue', 'win', 'rerack'].includes(v.result)) {
+    restoreShotStart();
+    v = { result: 'retake', msg: '<strong>Retake!</strong> ' + game.players[game.turn].name + "'s shot didn't count. Every ball is back, shoot again." };
+  }
+  shotFx = NO_FX;
   const before = net.on ? ballState() : null;   // where the balls stopped, before the rules move the white
-  const v = RULE.judge(shot, game);   // the rules engine decides what happens next
   applyVerdict(v);
   netSendResult(before, v);           // online: the shooter's table is the one that counts
 }
@@ -1610,7 +1910,7 @@ el.addEventListener('pointermove', e => {
       const step = e.clientX - gesture.lastX;
       turnAim(step * (e.shiftKey ? 0.0004 : 0.0025 * (1 + Math.abs(step) * 0.12)));
     }
-    if (gesture.mode === 'power') { power = Math.min(1, Math.max(0, dy / (0.4 * stage.clientHeight))); updatePower(); }
+    if (gesture.mode === 'power') { power = Math.min(game.fx.includes('short') ? PU_SHORT : 1, Math.max(0, dy / (0.4 * stage.clientHeight))); updatePower(); }
     gesture.lastX = e.clientX;
     return;
   }
@@ -1819,6 +2119,108 @@ function updateHand(dt) {
     handGhost.scale.setScalar(cue.r);
     handGhost.position.set(hand.ghost.x, cue.r, hand.ghost.z);
   }
+}
+
+// ---- Placing a wall: press on the cloth to put it there, drag to turn it, let go to drop it.
+// A quick tap drops it straight across the table. Esc (or Cancel) puts it away unused. ----
+const wallPick = { i: -1, prev: null, at: null, ang: Math.PI / 2, down: false, ok: false };
+function wallFrom(x, z, ang) {
+  const h = WALL_LEN() / 2, c = Math.cos(ang) * h, s = Math.sin(ang) * h;
+  // keep it on the cloth (inside the cushions)
+  const mx = HX - WALL_T - Math.abs(c), mz = HZ - WALL_T - Math.abs(s);
+  x = Math.max(-mx, Math.min(mx, x)); z = Math.max(-mz, Math.min(mz, z));
+  return { x1: x - c, z1: z - s, x2: x + c, z2: z + s };
+}
+// A wall can't be dropped on top of a ball (nor off the cloth)
+function wallFits(w) {
+  if ([w.x1, w.x2].some(x => Math.abs(x) > HX) || [w.z1, w.z2].some(z => Math.abs(z) > HZ)) return false;
+  const ex = w.x2 - w.x1, ez = w.z2 - w.z1, len2 = ex * ex + ez * ez;
+  if (len2 < 1e-6 || len2 > (WALL_LEN() * 1.05) ** 2) return false;
+  return balls.every(b => {
+    if (b.potted) return true;
+    const t = Math.max(0, Math.min(1, ((b.x - w.x1) * ex + (b.z - w.z1) * ez) / len2));
+    return Math.hypot(b.x - (w.x1 + ex * t), b.z - (w.z1 + ez * t)) > b.r + WALL_T + 0.002;
+  });
+}
+function startWall(i) {
+  wallPick.i = i; wallPick.at = null; wallPick.down = false; wallPick.ang = Math.PI / 2;
+  wallPick.prev = view;
+  gesture = null; placing = false; power = 0; updatePower();
+  if (view !== 'top') { looking = false; setView('top'); }   // the overhead view, like ball in hand
+  setReport('<strong>Place your wall.</strong> Press on the cloth to put it there, drag to turn it, let go to drop it. Esc cancels.');
+  updateUI();
+}
+function endWall() {
+  if (wallPick.i < 0) return;
+  wallPick.i = -1; wallPick.at = null; wallPick.down = false;
+  // back to where you were (the shooter goes back down on their shot, aim untouched)
+  if (wallPick.prev && wallPick.prev !== view && state === 'aim' && myTurn()) setView(wallPick.prev);
+  updateUI();
+}
+const wallOn = e => wallPick.i >= 0 && !(e.target.closest && e.target.closest('#puBox, #spinBox, #tiltBox, #admin'));
+el.addEventListener('pointerdown', e => {
+  if (!wallOn(e)) return;
+  e.stopImmediatePropagation();
+  if (!puCanUse(wallPick.i)) return endWall();
+  const p = tablePoint(e); if (!p) return;
+  wallPick.at = { x: p.x, z: p.z }; wallPick.down = true; wallPick.ang = Math.PI / 2;
+  el.setPointerCapture(e.pointerId);
+}, true);
+el.addEventListener('pointermove', e => {
+  if (!wallOn(e)) return;
+  e.stopImmediatePropagation();
+  const p = tablePoint(e); if (!p) return;
+  if (!wallPick.down) { wallPick.at = { x: p.x, z: p.z }; return; }   // hovering: the wall follows the pointer
+  const dx = p.x - wallPick.at.x, dz = p.z - wallPick.at.z;
+  if (Math.hypot(dx, dz) > R) wallPick.ang = Math.atan2(dz, dx);
+}, true);
+el.addEventListener('pointerup', e => {
+  if (wallPick.i < 0 || !wallPick.down) return;
+  e.stopImmediatePropagation();
+  wallPick.down = false;
+  const w = wallFrom(wallPick.at.x, wallPick.at.z, wallPick.ang);
+  if (!wallFits(w)) { setReport('<strong>No room there.</strong> A wall can\'t go on top of a ball. Try another spot.', true); return; }
+  const i = wallPick.i;
+  endWall();
+  usePowerup(i, w);
+}, true);
+addEventListener('keydown', e => { if (wallPick.i >= 0 && e.key === 'Escape') { e.stopImmediatePropagation(); endWall(); setReport('Wall put away.'); } }, true);
+
+// The walls on the table: a dark wooden bar with a brass top. Dropped ones, plus a see-through one while placing.
+const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x5a3a22).convertSRGBToLinear(), roughness: 0.6 });
+const wallTopMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xd9a441).convertSRGBToLinear(), roughness: 0.35, metalness: 0.5 });
+const pinMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xc4302b).convertSRGBToLinear(), roughness: 0.5 });
+const wallGhostMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false });
+const wallMeshes = [];
+function wallMesh(k) {
+  if (wallMeshes[k]) return wallMeshes[k];
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), wallMat); body.castShadow = true;
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), wallTopMat);
+  g.add(body, top); g.userData = { body, top };
+  scene.add(g);
+  return wallMeshes[k] = g;
+}
+function setWallMesh(g, w, ghost, ok, pin) {
+  const len = Math.hypot(w.x2 - w.x1, w.z2 - w.z1) + (pin ? WALL_T : 0), hgt = R * (pin ? 1.1 : 1.3);
+  const { body, top } = g.userData;
+  body.scale.set(len, hgt, WALL_T * 2); body.position.y = hgt / 2;
+  top.scale.set(len, R * 0.12, WALL_T * 2.2); top.position.y = hgt;
+  body.material = ghost ? wallGhostMat : pin ? pinMat : wallMat; top.material = ghost ? wallGhostMat : pin ? pinMat : wallTopMat;
+  if (ghost) wallGhostMat.color.set(ok ? 0xffffff : 0xff6a5a);
+  g.position.set((w.x1 + w.x2) / 2, 0, (w.z1 + w.z2) / 2);
+  g.rotation.y = -Math.atan2(w.z2 - w.z1, w.x2 - w.x1);
+  g.visible = true;
+}
+function updateWalls() {
+  const list = state === 'moving' ? shotFx.walls : RULE.powerups ? game.walls.concat(game.fx.includes('tight') ? jawWalls() : []) : [];
+  let k = 0;
+  for (const w of list) setWallMesh(wallMesh(k++), w, false, true, w.pin);
+  if (wallPick.i >= 0 && wallPick.at && state === 'aim') {
+    const w = wallFrom(wallPick.at.x, wallPick.at.z, wallPick.ang);
+    setWallMesh(wallMesh(k++), w, true, wallFits(w));
+  }
+  for (; k < wallMeshes.length; k++) wallMeshes[k].visible = false;
 }
 
 addEventListener('keydown', () => audioInit(), true);
@@ -2495,6 +2897,7 @@ function frame(now) {
   updateAimVisuals();
   updateCamera(dt);
   updateHand(dt);
+  updateFxVisuals(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -2549,7 +2952,7 @@ function fullState() {
   const rep = netEl('report');
   return { t: 'sync', seq: net.seq, rules: rulesSel.value, table: tableKey, shotCount, balls: ballState(),
            game: { turn: game.turn, breaker: game.breaker, isBreak: game.isBreak, freeShot: game.freeShot, extraVisit: game.extraVisit,
-                   ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })), ...matchState() },
+                   ballInHand: game.ballInHand, over: game.over, players: game.players.map(p => ({ ...p })), ...matchState(), ...puState() },
            over, report: rep.innerHTML, foul: rep.classList.contains('foul') };
 }
 function netSend(msg) {
@@ -2558,7 +2961,7 @@ function netSend(msg) {
 }
 function netSendShot(p) {
   if (!net.on) return;
-  netSend({ t: 'shot', base: net.seq, p, balls: ballState() });
+  netSend({ t: 'shot', base: net.seq, p, balls: ballState(), pu: clonePU(game.pu) });
 }
 function netSendResult(before, v) {
   if (!net.on) return;
@@ -2611,7 +3014,8 @@ function applySync(s) {
   const g = s.game;
   Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players = g.players.map((p, i) => ({ name: cleanName(p.name, 'Player ' + (i + 1)), group: p.group, frames: p.frames | 0 }));
-  takeMatch(g);
+  takeMatch(g); takePU(g);
+  shotFx = NO_FX;
   net.seq = s.seq;
   if (s.over) {
     netEl('overTitle').textContent = s.over.title; netEl('overWhy').textContent = s.over.why; netEl('overScore').textContent = s.over.score;
@@ -2667,6 +3071,9 @@ function onData(m) {
       case 'shot':   // they've hit it: play the same shot on our table
         if (m.base !== net.seq || myTurn()) break;
         applyBalls(m.balls);
+        // Their shot decides which power-ups made it in: one we switched on too late (after they'd struck) doesn't count
+        if (m.pu) game.pu = clonePU(m.pu);
+        game.fx = cleanFx(m.p.fx); game.walls = cleanWalls(m.p.walls);
         aim = { x: m.p.ax, z: m.p.az };
         chasing = false; frozen = false;
         strike(m.p);
@@ -2679,6 +3086,11 @@ function onData(m) {
         if (net.watch) { net.watch.result = m; net.watch.at = performance.now(); }
         else applyResult(m);
         break;
+      case 'pu':     // they switched a power-up on (only counts if the shot it's for hasn't been struck yet)
+        if (m.base !== net.seq || state !== 'aim' || net.watch || m.who === net.me || m.who !== 0 && m.who !== 1) break;
+        if (!game.pu[m.who] || game.pu[m.who].id !== m.id || game.pu[m.who].used) break;
+        applyPowerup(m.who, m.id, m.wall);
+        break;
       case 'next':   // the guest pressed Next frame (or New match once it's been won)
         if (net.host && game.over) { (game.matchOver ? newMatch : newFrame)(1 - game.breaker); netHostReset(); }
         break;
@@ -2688,6 +3100,7 @@ function onData(m) {
 }
 function applyResult(m) {
   net.watch = null;
+  shotFx = NO_FX;
   for (const b of balls) { b.vx = b.vz = b.ux = b.uz = b.side = 0; }
   state = 'aim';
   if (shot && shot.crossed instanceof Set) shot.crossed = shot.crossed.size;
@@ -3038,7 +3451,7 @@ function applyAdmin(m) {
   const g = m.game;
   Object.assign(game, { turn: g.turn, breaker: g.breaker, isBreak: g.isBreak, freeShot: g.freeShot, extraVisit: !!g.extraVisit, ballInHand: g.ballInHand, over: g.over });
   game.players.forEach((p, i) => { p.group = g.players[i].group; p.frames = g.players[i].frames | 0; });
-  takeMatch(g);
+  takeMatch(g); takePU(g);
   net.seq = m.seq;
   if (m.over) { netEl('overTitle').textContent = m.over.title; netEl('overWhy').textContent = m.over.why; netEl('overScore').textContent = m.over.score; }
   netEl('over').hidden = !g.over;
@@ -3160,7 +3573,7 @@ el.addEventListener('pointercancel', adminDrop, true);
 function adminSnapshot() {
   const r = admEl('report');
   admin.snap = { balls: ballState(), shotCount, aim: { ...aim },
-    game: { ...game, players: game.players.map(p => ({ ...p })), history: [...game.history] }, report: r.innerHTML, foul: r.classList.contains('foul') };
+    game: { ...game, players: game.players.map(p => ({ ...p })), history: [...game.history], ...puState() }, report: r.innerHTML, foul: r.classList.contains('foul') };
 }
 admEl('admUndo').addEventListener('click', () => {
   const s = admin.snap;
@@ -3171,6 +3584,7 @@ admEl('admUndo').addEventListener('click', () => {
   for (const b of balls) { b.mesh.visible = !b.potted; b.mesh.scale.setScalar(1); b.mesh.material.color.setScalar(1); }
   shotCount = s.shotCount; aim = { ...s.aim };
   Object.assign(game, s.game, { players: s.game.players.map(p => ({ ...p })), history: [...s.game.history] });
+  takePU(s.game); shotFx = NO_FX;
   admEl('over').hidden = !game.over;
   setReport(s.report, s.foul);
   pendingView = null; view = game.ballInHand && game.ballInHand !== 'baulk-optional' ? 'top' : 'cue';
