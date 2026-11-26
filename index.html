@@ -538,7 +538,7 @@ const PU_ATT = Object.keys(POWERUPS).filter(k => POWERUPS[k].kind === 'att');
 const PU_DEF = Object.keys(POWERUPS).filter(k => POWERUPS[k].kind === 'def');
 // How much each effect changes the physics
 const PU_BUCKET = 0;     // Bucket Pockets: a ball also drops once its centre is within half the mouth (+ this many ball radii) of the mouth middle: about twice as wide
-const PU_TIGHT = 0.05;  // Tight Pockets: a stub on each jaw (this many ball radii long, plus its thickness): about 40% narrower corners
+const PU_TIGHT = 0.12;  // Tight Pockets: a stub on each jaw (this many ball radii long, plus its thickness): roughly half as many straight-in pots drop
 const PU_CLOTH = 2.4;                              // rolling drag x this
 const PU_DEAD = 0.55;                              // cushion bounce x this
 const PU_CHALK = 1.35, PU_SHORT = 0.55;            // power x this / power capped at this
