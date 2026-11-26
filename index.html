@@ -36,6 +36,11 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #over{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,8,7,.55)}
 #spinBox{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;align-items:center;gap:6px;touch-action:none}
 #spinBox[hidden]{display:none}
+#tiltBox{position:absolute;left:16px;bottom:16px;display:flex;flex-direction:column;align-items:center;gap:6px;touch-action:none}
+#tiltBox[hidden]{display:none}
+#tiltBox button{width:44px;height:40px;padding:0;font-size:16px;line-height:1;background:rgba(18,16,14,.86);color:var(--ink);border:1px solid rgba(255,255,255,.18);border-radius:8px;cursor:pointer;-webkit-user-select:none;user-select:none}
+#tiltBox button:active{background:rgba(60,52,44,.95)}
+#tiltBox span{font:600 12px "Barlow Condensed",sans-serif;color:var(--dim);background:rgba(18,16,14,.86);padding:1px 8px;border-radius:10px}
 #spinBall{position:relative;width:96px;height:96px;border-radius:50%;cursor:crosshair;
   background:radial-gradient(circle at 38% 32%,#fff 0,#f1ece2 38%,#cfc6b6 78%,#9d9384 100%);
   box-shadow:0 6px 18px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.15)}
@@ -46,7 +51,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #spinDot{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;left:50%;top:50%;
   background:#c4161c;box-shadow:0 0 0 2px rgba(255,255,255,.85),0 1px 3px rgba(0,0,0,.5);pointer-events:none}
 #spinLabel{font:600 14px "Barlow Condensed",sans-serif;color:var(--ink);background:rgba(18,16,14,.86);padding:2px 10px;border-radius:10px}
-@media(max-width:600px){#spinBall{width:76px;height:76px}#spinBox{right:10px;bottom:10px}}
+@media(max-width:600px){#spinBall{width:76px;height:76px}#spinBox{right:10px;bottom:10px}#tiltBox{left:10px;bottom:10px}}
 #over[hidden]{display:none}
 /* Ball return (in the footer, so it never covers the table): potted balls drop out of a chute and roll along this gully */
 #ballRack{flex:0 0 auto;width:clamp(240px,26vw,360px);padding:4px 6px;border-radius:999px;pointer-events:none;
@@ -169,6 +174,11 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <div id="spinBox" hidden>
     <div id="spinBall" role="slider" tabindex="0" aria-label="Where to hit the cue ball (W A S D to move, X to centre)"><i id="spinDot"></i></div>
     <span id="spinLabel">Centre</span>
+  </div>
+  <div id="tiltBox" hidden>
+    <button id="tiltUp" aria-label="Raise the view (hold, or press the up arrow)" title="Raise the view (↑ or scroll)">▲</button>
+    <span>View</span>
+    <button id="tiltDown" aria-label="Lower the view (hold, or press the down arrow)" title="Lower the view (↓ or scroll)">▼</button>
   </div>
   <div id="netCard" hidden><div class="card" role="dialog" aria-labelledby="netTitle">
     <h2 id="netTitle">Play online</h2>
@@ -582,6 +592,7 @@ function updateUI() {
   const h = document.getElementById('hint');
   const v = typeof view === 'undefined' ? 'top' : view;
   document.getElementById('spinBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && myTurn());
+  document.getElementById('tiltBox').hidden = !(v === 'cue' && state === 'aim' && !game.over && !(typeof looking !== 'undefined' && looking));
   h.hidden = state !== 'aim' || game.over;
   const vb = document.getElementById('viewBtn'), look = typeof looking !== 'undefined' && looking;
   vb.setAttribute('aria-pressed', look);
@@ -595,7 +606,7 @@ function updateUI() {
     h.hidden = game.over || !net.connected;
     h.textContent = state === 'aim' ? 'Waiting for ' + them + ' to play' : 'Watching ' + them + "'s shot";
   } else if (look) h.textContent = 'Just looking, no shooting · press T or Overview to get back down on your shot';
-  else if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D)' + (game.ballInHand ? ' · V moves the white' : '');
+  else if (v === 'cue') h.textContent = 'Drag sideways to aim · drag down and let go to shoot · spin: tap the ball (W A S D) · ↑ ↓ or scroll: view height' + (game.ballInHand ? ' · V moves the white' : '');
   else if (game.ballInHand) h.textContent = game.ballInHand === 'baulk-optional'
       ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
       : 'Drag the white to place it' + (game.ballInHand === 'baulk' ? ' behind the baulk line' : '') + ' · press anywhere else to get down on the shot';
@@ -1505,6 +1516,9 @@ addEventListener('keydown', e => {
     else setSpin(spin.x + (k === 'd' ? 0.2 : k === 'a' ? -0.2 : 0), spin.y + (k === 'w' ? 0.2 : k === 's' ? -0.2 : 0));
     return;
   }
+  if (view === 'cue' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault(); tiltHold.key = e.key === 'ArrowUp' ? 1 : -1; return;
+  }
   if (view !== 'cue' || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
   e.preventDefault();
   // left turns the aim left, right turns it right (0.1° a press, 1° with Shift)
@@ -1803,10 +1817,43 @@ function updateCuePose() {
   // Low behind the cue ball, eyes just above the cue, looking along the aim line
   const back = 0.62, ahead = 0.9;
   // and if the cue is jacked up over a rail or a ball, rise gently so we stay above it rather than inside it
-  const height = Math.max(0.16, cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05);
+  // The player can also lift or lower their eye line a little (viewLift, see below): that only moves the
+  // camera, never the aim or the shot, and the rise over a jacked-up cue still wins if it needs to be higher.
+  const eye = 0.16 + viewLift * (viewLift > 0 ? VIEW_UP : VIEW_DOWN);
+  const height = Math.max(eye, cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05);
   cuePose.pos.set(cue.x - aim.x * back, cue.r + height, cue.z - aim.z * back);
   cuePose.look.set(cue.x + aim.x * ahead, 0, cue.z + aim.z * ahead);
   cuePose.fov = camera.aspect < 0.9 ? 64 : 50;   // a bit wider on a phone
+}
+
+// --- View height: the player can raise or lower the cue view a little while aiming ---
+// Hold ↑ / ↓ (or the ▲ ▼ buttons), or scroll. viewLiftWant is where you've asked for, -1 (lowest) .. 1
+// (highest); viewLift eases after it so the camera drifts there gently. It only goes straight up and
+// down (the camera keeps looking at the same spot down the aim line), never sideways, and it never
+// moves on its own. It stays where you left it for the next shot.
+const VIEW_UP = 0.22, VIEW_DOWN = 0.05;   // metres above / below the normal eye height (0.16 over the ball)
+const VIEW_RATE = 0.7;                    // how fast holding a key moves it (full range in about 1.5 s)
+let viewLiftWant = 0, viewLift = 0;
+const tiltHold = { key: 0, btn: 0 };
+function updateViewLift(dt) {
+  const canTilt = view === 'cue' && state === 'aim' && !game.over && !looking;
+  const dir = canTilt ? tiltHold.key || tiltHold.btn : 0;
+  if (dir) viewLiftWant = Math.max(-1, Math.min(1, viewLiftWant + dir * VIEW_RATE * dt));
+  viewLift += (viewLiftWant - viewLift) * (1 - Math.exp(-dt * 5));
+}
+addEventListener('keyup', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') tiltHold.key = 0; });
+addEventListener('blur', () => { tiltHold.key = tiltHold.btn = 0; });
+el.addEventListener('wheel', e => {
+  if (view !== 'cue' || state !== 'aim' || game.over || looking) return;
+  e.preventDefault();
+  const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;   // lines -> pixels
+  viewLiftWant = Math.max(-1, Math.min(1, viewLiftWant - d * 0.0015));
+}, { passive: false });
+for (const [id, dir] of [['tiltUp', 1], ['tiltDown', -1]]) {
+  const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); b.setPointerCapture(e.pointerId); tiltHold.btn = dir; });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => { if (tiltHold.btn === dir) tiltHold.btn = 0; });
+  b.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 // camBlend runs from 0 (top) to 1 (cue). We ease it so the swoop starts and ends gently.
@@ -1930,6 +1977,7 @@ function updateCamera(dt) {
   } else goal = view === 'cue' && !game.over && !cue.potted ? 1 : 0;
   camBlend += Math.sign(goal - camBlend) * Math.min(Math.abs(goal - camBlend), dt / SWOOP_TIME);
   updateTopPose();
+  updateViewLift(dt);
   if (!frozen) updateCuePose();
   if (glideT < 1) {
     // Gliding from the end of the chase to the next shot: ease along, with a gentle hop up in the
