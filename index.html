@@ -1284,22 +1284,135 @@ function setReport(html, isFoul) {
 // ================================================================
 // 6. AIM GUIDE AND CUE STICK
 // ================================================================
-// Cue stick: a tapered cylinder inside a group. The group sits on the cue ball and turns to face the aim.
+// Cue stick: one turned (lathe) mesh inside a group. The group sits on the cue ball and turns to face the aim.
+// It's drawn like a real two-piece cue, tip to butt: chalked leather tip, ivory ferrule, maple shaft, joint
+// collar, a rosewood forearm with four ebony points, a linen wrap, a rosewood sleeve and a rubber bumper.
+// The wood, wrap and inlays are all painted onto one canvas, so it's one mesh, one texture, one draw call.
 const cueGroup = new THREE.Group();
 const CUE_LEN = 1.45;
-const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.014, CUE_LEN, 16), mat('#c9a06a', 0.5));
-stick.rotation.z = -Math.PI / 2;       // lay it flat, thin tip pointing along +x
-stick.castShadow = true;
-const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.0066, 0.0066, 0.012, 16), mat('#3b6ea8', 0.9));
-tip.rotation.z = -Math.PI / 2;
-const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.0142, 0.0142, 0.35, 16), mat('#22140c', 0.5));
-butt.rotation.z = -Math.PI / 2;
+// Where each part starts and ends, in metres from the tip
+const CUE_PARTS = { tip: 0.011, ferrule: 0.036, shaft: 0.72, collar: 0.736, forearm: 1.0, ring1: 1.008,
+                    wrap: 1.27, ring2: 1.278, sleeve: 1.426 };
+const cueRadius = d => 0.0065 + 0.0075 * d / CUE_LEN;   // straight taper, ~13 mm tip to ~28 mm butt
+const cueTex = (() => {
+  const W = 128, H = 2048, P = CUE_PARTS;   // across = round the cue, down = tip to butt
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), img = g.createImageData(W, H), px = img.data;
+  // smooth 1D noise that repeats every `per` steps, so the grain meets itself round the back of the cue
+  const HT = new Float32Array(4096);
+  for (let i = 0; i < 4096; i++) { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; HT[i] = s - Math.floor(s); }
+  const hash = i => HT[i & 4095];
+  const noise = (x, per, seed) => {
+    const i = Math.floor(x), f = x - i, t = f * f * (3 - 2 * f);
+    const a = hash(((i % per) + per) % per + seed * 101), b = hash((((i + 1) % per) + per) % per + seed * 101);
+    return a + (b - a) * t;
+  };
+  // wood grain: long lines running down the cue that wander a little, with darker growth rings
+  const grain = (u, d, lines, seed) => {
+    const w = u * lines + 1.6 * noise(d * 9 + seed, 1e6, seed) + 0.8 * noise(u * 8, 8, seed + 1);
+    const ring = Math.pow(Math.abs(Math.sin(Math.PI * w)), 6);
+    return ring * (0.6 + 0.4 * noise(d * 40, 1e6, seed + 2)) + 0.25 * (noise(u * 64 + d * 3, 64, seed + 3) - 0.5);
+  };
+  const POINTS = 4, APEX = 0.05, VENEER = 0.018;
+  // colour of the cue at u (0..1 round it) and d (metres from the tip); x, y are the canvas pixel
+  const col = (u, d, x, y) => {
+    if (d < P.tip) {                             // leather tip, chalked blue
+      const n = noise(u * 32 + y * 0.7, 32, 9) * 0.3;
+      return [52 + 40 * n, 92 + 50 * n, 150 + 50 * n];
+    }
+    if (d < P.ferrule) {                         // ivory-coloured ferrule
+      const n = noise(u * 16, 16, 4) * 0.06;
+      return [236 - 30 * n, 230 - 30 * n, 212 - 40 * n];
+    }
+    if (d < P.shaft) {                           // maple shaft: pale honey with fine, faint grain
+      const k = grain(u, d, 14, 1) * 0.45;
+      return [228 - 30 * k, 194 - 34 * k, 140 - 32 * k];
+    }
+    if (d < P.collar) {                          // joint collar: ivory with two thin black rings
+      const t = (d - P.shaft) / (P.collar - P.shaft), dark = (t > 0.15 && t < 0.25) || (t > 0.75 && t < 0.85);
+      return dark ? [18, 16, 14] : [230, 222, 200];
+    }
+    if (d < P.forearm) {                         // forearm: rosewood with four ebony points
+      const t = (d - P.collar) / (P.forearm - P.collar);      // 0 at the joint, 1 by the wrap
+      const half = t > APEX ? 0.118 * (t - APEX) / (1 - APEX) : -1;   // half-width of each point (veneer included)
+      const off = Math.abs(((u * POINTS) % 1) - 0.5) / POINTS;      // distance round to the nearest point's centre
+      if (off < half - VENEER) {                 // ebony
+        const k = grain(u, d, 30, 7);
+        return [26 - 10 * k, 20 - 8 * k, 18 - 6 * k];
+      }
+      if (off < half) {                          // veneer lines round each point: white, red, white
+        const e = (half - off) / VENEER;
+        return e > 0.33 && e < 0.66 ? [150, 28, 24] : [236, 226, 206];
+      }
+      const k = grain(u, d, 10, 3);
+      return [112 - 48 * k, 52 - 26 * k, 30 - 16 * k];
+    }
+    if (d < P.ring1 || (d >= P.wrap && d < P.ring2)) {   // black/white/black rings either side of the wrap
+      const t = d < P.ring1 ? (d - P.forearm) / (P.ring1 - P.forearm) : (d - P.wrap) / (P.ring2 - P.wrap);
+      return t > 0.35 && t < 0.65 ? [230, 222, 200] : [16, 14, 12];
+    }
+    if (d < P.wrap) {                            // Irish linen wrap: tight black weave
+      const a = (x + y) & 3, bb = (x - y + 4096) & 3, k = ((a < 2) !== (bb < 2)) ? 1 : 0;
+      const n = noise(u * 64 + y * 0.9, 64, 11) * 0.5;
+      return [26 + 16 * k + 10 * n, 25 + 15 * k + 10 * n, 24 + 14 * k + 10 * n];
+    }
+    if (d < P.sleeve) {                          // rosewood sleeve with four pearl dots
+      const du = (((u * POINTS) % 1) - 0.5) * 2 * Math.PI * cueRadius(d) / POINTS, dd = d - (P.ring2 + P.sleeve) / 2;
+      if (du * du + dd * dd < 0.0032 * 0.0032) return [226, 232, 236];
+      const k = grain(u, d, 10, 5);
+      return [104 - 46 * k, 48 - 24 * k, 28 - 14 * k];
+    }
+    return [14, 14, 14];                         // rubber bumper
+  };
+  for (let y = 0; y < H; y++) {
+    const d = (y + 0.5) / H * CUE_LEN;
+    // the points and dots have slanted/curved edges, so smooth those rows with 4 samples per pixel
+    const ss = (d >= P.collar && d < P.forearm) || (d >= P.ring2 && d < P.sleeve) ? 4 : 1;
+    for (let x = 0; x < W; x++) {
+      let r = 0, gr = 0, b = 0;
+      for (let s = 0; s < ss; s++) {
+        const c = col((x + (s + 0.5) / ss) / W, d, x, y);
+        r += c[0]; gr += c[1]; b += c[2];
+      }
+      const i = (y * W + x) * 4;
+      px[i] = r / ss; px[i + 1] = gr / ss; px[i + 2] = b / ss; px[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+  t.wrapS = THREE.RepeatWrapping;
+  return t;
+})();
+// The cue's outline, turned round its long axis. y = 0 is the tip's face and y = -CUE_LEN the butt.
+const stick = (() => {
+  const P = CUE_PARTS, pts = [], at = (d, r) => pts.push(new THREE.Vector2(r, -d));
+  at(CUE_LEN, 0);                                            // centre of the bumper's end
+  at(CUE_LEN, cueRadius(CUE_LEN) - 0.0012); at(CUE_LEN - 0.002, cueRadius(CUE_LEN));
+  at(P.sleeve, cueRadius(P.sleeve)); at(P.wrap, cueRadius(P.wrap));
+  at(P.forearm, cueRadius(P.forearm));
+  at(P.collar, cueRadius(P.collar) + 0.0003); at(P.shaft, cueRadius(P.shaft) + 0.0003);   // collar sits a touch proud
+  at(P.shaft - 0.001, cueRadius(P.shaft));
+  at(0.36, cueRadius(0.36));
+  at(P.ferrule, cueRadius(P.ferrule)); at(P.tip, cueRadius(P.tip));
+  at(0.0025, cueRadius(0)); at(0.0008, cueRadius(0) * 0.8); at(0, cueRadius(0) * 0.45);   // domed tip
+  at(0, 0);
+  // the outline runs butt to tip, so faces point outward
+  const geo = new THREE.LatheGeometry(pts, 18);
+  // spread the texture by distance along the cue (Three spaces it by outline point instead)
+  const pos = geo.attributes.position, uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setY(i, 1 + pos.getY(i) / CUE_LEN);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: cueTex, roughness: 0.38 }));
+  m.rotation.z = -Math.PI / 2;     // lay it flat, tip pointing along +x
+  m.castShadow = true;
+  return m;
+})();
 // The stick lives in a "tilt" group so the butt end rises, like a real cue resting on a bridge hand.
 // Normally it's about 4°, but like a real player the cue is jacked up more when it has to clear the
 // rail, a cushion or another ball behind the white (see cueTiltNeeded). This is only how it looks: the
 // shot itself always plays as a ~4° cue (CUE_ELEVATION).
 const cueTilt = new THREE.Group();
-cueTilt.add(stick, tip, butt);
+cueTilt.add(stick);
 cueGroup.add(cueTilt); scene.add(cueGroup);
 const CUE_TILT_MIN = 0.07, CUE_TILT_MAX = 0.75;   // radians: ~4° normally, up to ~43° over a frozen-to-the-rail white
 const CUE_PULL = 0.28;      // how far the cue draws back at full power
@@ -1364,9 +1477,7 @@ function placeCueStick(x, z, ax, az, sx, sy) {
 }
 // back = distance from the tip to the cue's pivot on the white (negative = through where the ball was)
 function setCueBack(back) {
-  stick.position.x = -back - CUE_LEN / 2;
-  tip.position.x = -back - 0.006;
-  butt.position.x = -back - CUE_LEN + 0.175;
+  stick.position.x = -back;
 }
 
 // ---- Follow-through: after it hits, the cue keeps going a little, holds, then goes away ----
