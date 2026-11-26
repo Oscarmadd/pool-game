@@ -1183,6 +1183,7 @@ function shoot() {
 // Hit the white: p = aim direction (ax, az), power 0..1, and where the tip hits (sx, sy, -1..1)
 function strike(p) {
   adminSnapshot();   // admin panel: lets you undo this shot (yours, or your friend's when you're watching it)
+  startFollow(p);    // the cue carries on through the white after it hits (just for looks)
   sfxStrike(p.power * (p.ps > 0 ? Math.min(2, p.ps) : 1), cue.x, cue.z, p.brk !== undefined ? p.brk : game.isBreak);
   launchCue(p);
   // Everything the rules need to know about this shot gets recorded in here as it plays out
@@ -1306,7 +1307,8 @@ function updateAimVisuals() {
   cueGroup.visible = aiming;
   const now = performance.now(), dt = Math.min(0.1, (now - cueTiltT) / 1000);
   cueTiltT = now;
-  if (!aiming) { cueWasShown = false; return; }
+  if (!aiming) { cueWasShown = false; if (!drawFollow(now)) cueGroup.visible = false; return; }
+  follow = null;
 
   // Raise or lower the butt smoothly as the aim changes (straight to it when the cue first appears)
   const want = cueTiltNeeded();
@@ -1314,18 +1316,49 @@ function updateAimVisuals() {
   cueWasShown = true;
   cueTilt.rotation.z = -cueTiltNow;
 
-  cueGroup.position.set(cue.x, cue.r + 0.004, cue.z);
-  cueGroup.rotation.y = Math.atan2(-aim.z, aim.x);
+  const s0 = placeCueStick(cue.x, cue.z, aim.x, aim.z, spin.x, spin.y);
+  // pull back further the more power you've dialled in
+  setCueBack(s0 + CUE_GAP + power * CUE_PULL);
+}
+// Put the cue on the white at (x, z), pointing along (ax, az), with the tip at spin spot (sx, sy).
+// Returns how far back along the cue's line the ball's surface is, so the tip rests just off it whatever the angle.
+function placeCueStick(x, z, ax, az, sx, sy) {
+  cueGroup.position.set(x, cue.r + 0.004, z);
+  cueGroup.rotation.y = Math.atan2(-az, ax);
   // move the cue up/down and left/right to the spot you've chosen on the spin dial
-  const py = spin.y * MAX_TIP * cue.r, pz = spin.x * MAX_TIP * cue.r;
+  const py = sy * MAX_TIP * cue.r, pz = sx * MAX_TIP * cue.r;
   cueTilt.position.set(0, py, pz);
-  // Where the cue's line meets the ball's surface, so the tip rests just off the ball whatever the angle.
-  // Then pull back further the more power you've dialled in.
-  const pd = py * Math.sin(cueTiltNow), s0 = -pd + Math.sqrt(Math.max(0, pd * pd - py * py - pz * pz + cue.r * cue.r));
-  const back = s0 + CUE_GAP + power * CUE_PULL;
+  const pd = py * Math.sin(cueTiltNow);
+  return -pd + Math.sqrt(Math.max(0, pd * pd - py * py - pz * pz + cue.r * cue.r));
+}
+// back = distance from the tip to the cue's pivot on the white (negative = through where the ball was)
+function setCueBack(back) {
   stick.position.x = -back - CUE_LEN / 2;
   tip.position.x = -back - 0.006;
   butt.position.x = -back - CUE_LEN + 0.175;
+}
+
+// ---- Follow-through: after it hits, the cue keeps going a little, holds, then goes away ----
+// Only for looks: it starts at the white's spot when it was struck and never passes the moving white.
+const FOLLOW_GO = 0.22, FOLLOW_HOLD = 0.45, FOLLOW_END = 0.75;   // seconds: push through, hold still, then gone
+let follow = null;
+function startFollow(p) {
+  // the tip's speed at contact, from the same sum as the stroke, so watching online looks the same
+  const pw = Math.min(1, p.power), vc = 2 * pw * CUE_PULL / (strokeTime(pw) / 1000);
+  follow = { t0: performance.now(), x: cue.x, z: cue.z, ax: p.ax, az: p.az, sx: p.sx, sy: p.sy,
+             dist: Math.min(0.12, Math.max(0.012, vc * FOLLOW_GO / 2)) };
+}
+function drawFollow(now) {
+  if (!follow) return false;
+  const t = (now - follow.t0) / 1000;
+  if (t > FOLLOW_END) { follow = null; return false; }
+  cueGroup.visible = true;
+  const s0 = placeCueStick(follow.x, follow.z, follow.ax, follow.az, follow.sx, follow.sy);
+  const k = Math.min(1, t / FOLLOW_GO), go = follow.dist * (1 - (1 - k) * (1 - k));   // eases to a stop
+  // never let the tip run into the white (on a soft shot it can be slower than the tip)
+  const gone = (cue.x - follow.x) * follow.ax + (cue.z - follow.z) * follow.az;
+  setCueBack(s0 - Math.min(go, Math.max(0, gone - 0.002)));
+  return true;
 }
 
 // ================================================================
@@ -3045,9 +3078,11 @@ function runStroke(steps, done, abort) {
   };
   requestAnimationFrame(tick);
 }
-// The final push: from drawn back at power pw, speeding up into the ball (harder shots come through faster)
+// The final push: from drawn back at power pw, speeding up into the ball. Slow enough to watch the cue
+// come through (about 0.45 s on a soft shot, 0.25 s at full power); harder shots come through faster.
+const strokeTime = pw => 450 - Math.min(1, pw) * 200;
 function strokeThrough(pw, hit) {
-  runStroke([{ dur: 140 - pw * 60, raw: true, fn: k => { power = pw * (1 - k * k); updatePower(); } }], hit, () => state !== 'aim');
+  runStroke([{ dur: strokeTime(pw), raw: true, fn: k => { power = pw * (1 - k * k); updatePower(); } }], hit, () => state !== 'aim');
 }
 el.addEventListener('pointerdown', e => { if (stroke.on) e.stopImmediatePropagation(); }, true);
 addEventListener('keydown', e => {
