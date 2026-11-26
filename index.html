@@ -1822,6 +1822,8 @@ function updateCuePose() {
   // view always responds straight away; lowering it never takes the camera below what the cue needs.
   const clear = cuePivotY() - cue.r + back * Math.tan(cueTiltNow) + 0.05;
   const base = Math.max(0.16, clear);
+  // how far down the view can actually go right now (none at all while the cue is jacked up)
+  viewLiftMin = Math.max(-1, Math.min(0, (clear - base) / VIEW_DOWN));
   const height = Math.max(clear, base + viewLift * (viewLift > 0 ? VIEW_UP : VIEW_DOWN));
   cuePose.pos.set(cue.x - aim.x * back, cue.r + height, cue.z - aim.z * back);
   cuePose.look.set(cue.x + aim.x * ahead, 0, cue.z + aim.z * ahead);
@@ -1835,12 +1837,18 @@ function updateCuePose() {
 // moves on its own. It stays where you left it for the next shot.
 const VIEW_UP = 0.22, VIEW_DOWN = 0.05;   // metres above / below the normal eye height (0.16 over the ball)
 const VIEW_RATE = 0.7;                    // how fast holding a key moves it (full range in about 1.5 s)
-let viewLiftWant = 0, viewLift = 0;
+let viewLiftWant = 0, viewLift = 0, viewLiftMin = -1;
+// Move where you've asked for. Anything below what's reachable right now is dropped first, so pushing
+// down past the bottom never has to be "undone" before going up responds again.
+function nudgeView(d) {
+  viewLiftWant = Math.max(viewLiftMin, Math.min(1, Math.max(viewLiftWant, viewLiftMin) + d));
+  viewLift = Math.max(viewLift, viewLiftMin);
+}
 const tiltHold = { key: 0, btn: 0 };
 function updateViewLift(dt) {
   const canTilt = view === 'cue' && state === 'aim' && !game.over && !looking;
   const dir = canTilt ? tiltHold.key || tiltHold.btn : 0;
-  if (dir) viewLiftWant = Math.max(-1, Math.min(1, viewLiftWant + dir * VIEW_RATE * dt));
+  if (dir) nudgeView(dir * VIEW_RATE * dt);
   viewLift += (viewLiftWant - viewLift) * (1 - Math.exp(-dt * 5));
 }
 addEventListener('keyup', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') tiltHold.key = 0; });
@@ -1849,7 +1857,7 @@ el.addEventListener('wheel', e => {
   if (view !== 'cue' || state !== 'aim' || game.over || looking) return;
   e.preventDefault();
   const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;   // lines -> pixels
-  viewLiftWant = Math.max(-1, Math.min(1, viewLiftWant - d * 0.0015));
+  nudgeView(-d * 0.0015);
 }, { passive: false });
 for (const [id, dir] of [['tiltUp', 1], ['tiltDown', -1]]) {
   const b = document.getElementById(id);
