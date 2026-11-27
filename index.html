@@ -4029,13 +4029,14 @@ const cpuOn = (g, who) => balls.filter(b => b !== cue && !b.potted && (!RULE.isO
 function cpuEase(g, who) {
   if (cue.potted) return 0.8;
   let e = 0;
-  for (const b of cpuOn(g, who)) for (const q of POCKETS) { const p = cpuPair(cue.x, cue.z, b, q); if (p) e = Math.max(e, p.e); }
+  for (const b of cpuOn({ ...g, freeShot: false }, who)) for (const q of POCKETS) { const p = cpuPair(cue.x, cue.z, b, q); if (p) e = Math.max(e, p.e); }
   return e;
 }
-// Every pot that's on from (cx, cz), easiest first
+// Every pot worth going for from (cx, cz), easiest first. A free shot may be played onto any ball, but potting
+// the other player's balls (or the black too early) only helps them, so it only goes for its own.
 function cpuPairs(cx, cz) {
   const out = [];
-  for (const b of cpuOn({ ...game, freeShot: game.freeShot }, game.turn)) for (const q of POCKETS) { const p = cpuPair(cx, cz, b, q); if (p && p.e > 0.015) out.push(p); }
+  for (const b of cpuOn({ ...game, freeShot: false }, game.turn)) for (const q of POCKETS) { const p = cpuPair(cx, cz, b, q); if (p && p.e > 0.015) out.push(p); }
   return out.sort((a, b) => b.e - a.e);
 }
 // About how hard to hit it: enough to get the object ball to the pocket with some pace to spare
@@ -4108,9 +4109,13 @@ function cpuValue(v, s, g, lv) {
   if (r === 'lose') return -10000;
   if (r === 'rerack') return 0;
   if (r === 'foul') return -1800;
-  if (r === 'continue') return 1000 + 60 * s.potted.length + lv.pos * 600 * cpuEase(g, me);
-  if (game.extraVisit) return 300 + lv.pos * 300 * cpuEase(g, me);   // a miss, but it's still the second of two visits
-  return -600 * cpuEase(g, 1 - me);
+  // Every one of the other player's balls it pots is one fewer they need: worth more to them than keeping the
+  // table is to the computer (a free shot, or one that goes in with its own)
+  const grp = g.players[me].group, theirs = grp ? s.potted.filter(n => n !== 8 && groupOf(n) !== grp).length : 0;
+  const mine = s.potted.length - theirs, gift = 900 * theirs;
+  if (r === 'continue') return 1000 + 60 * mine - gift + lv.pos * 600 * cpuEase(g, me);
+  if (game.extraVisit) return 300 - gift + lv.pos * 300 * cpuEase(g, me);   // a miss, but it's still the second of two visits
+  return -600 * cpuEase(g, 1 - me) - gift;
 }
 // How the cue ball's angle moves the object ball's angle (just geometry, measured either side), so a try that
 // sends the object ball off line can be corrected in one go
