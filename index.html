@@ -16,20 +16,17 @@
 *{box-sizing:border-box;min-width:0}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Barlow,system-ui,sans-serif;display:flex;flex-direction:column;height:100dvh;overflow:hidden}
-header,footer{display:flex;align-items:center;gap:12px 20px;flex-wrap:wrap;padding:10px max(3vw,14px);background:var(--panel);border-color:var(--line);border-style:solid;border-width:0}
-header{border-bottom-width:1px}footer{border-top-width:1px}
+footer{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;padding:7px max(2vw,12px);background:var(--panel);border-top:1px solid var(--line)}
 h1{font:700 24px/1.05 "Barlow Condensed",sans-serif;margin:0;letter-spacing:.01em}
-h1 span{color:var(--dim);font-weight:600}
 .grow{flex:1}
 button{font:600 16px "Barlow Condensed",sans-serif;color:var(--ink);background:#2a2520;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 16px;cursor:pointer}
 button:hover{background:#342d27}button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 button[aria-pressed=true]{border-color:var(--brass);color:var(--brass)}
-.sel{display:flex;align-items:center;gap:8px;font:600 15px "Barlow Condensed",sans-serif;color:var(--dim)}
 select{font:600 16px "Barlow Condensed",sans-serif;color:var(--ink);background:#2a2520;border:1px solid #3d352d;border-radius:8px;min-height:44px;padding:0 10px}
 select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #stage{position:relative;flex:1;touch-action:none;cursor:crosshair}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-#banner{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:rgba(18,16,14,.86);padding:7px 16px;border-radius:8px;pointer-events:none;text-align:center;max-width:94%;display:flex;flex-direction:column;gap:1px}
+#banner{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:rgba(18,16,14,.86);padding:7px 16px;border-radius:8px;pointer-events:none;text-align:center;max-width:calc(100% - 136px);display:flex;flex-direction:column;gap:1px}
 #turnText{font:700 18px/1.2 "Barlow Condensed",sans-serif;color:var(--ink);letter-spacing:.01em}
 #turnText em{font-style:normal;color:var(--brass)}
 #hint{font-size:13px;color:var(--dim)}
@@ -40,8 +37,40 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #tiltBox[hidden]{display:none}
 #tiltBox button{width:44px;height:40px;padding:0;font-size:16px;line-height:1;background:rgba(18,16,14,.86);color:var(--ink);border:1px solid rgba(255,255,255,.18);border-radius:8px;cursor:pointer;-webkit-user-select:none;user-select:none}
 #tiltBox button:active{background:rgba(60,52,44,.95)}
-#tiltBox #pushBtn{width:auto;height:30px;padding:0 8px;margin-top:4px;font:600 13px "Barlow Condensed",sans-serif;color:var(--dim)}
-#tiltBox #pushBtn[aria-pressed="true"]{color:var(--ink);border-color:var(--brass)}
+/* Corner buttons over the table (menu top left, overview top right) and the slide-out menu */
+.corner{position:absolute;top:12px;z-index:3;display:flex;align-items:center;gap:7px;min-height:44px;padding:0 12px;
+  background:rgba(18,16,14,.86);border:1px solid rgba(255,255,255,.14);border-radius:10px;font-size:15px;color:var(--ink)}
+.corner:hover{background:rgba(52,45,39,.95)}
+.corner svg{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#menuBtn{left:12px}#viewBtn{right:12px}
+#viewBtn:disabled{display:none}
+#viewBtn[aria-pressed=true]{border-color:var(--brass);color:var(--brass)}
+#menuBtn.on::after{content:"";position:absolute;top:7px;right:7px;width:8px;height:8px;border-radius:50%;background:#6fae7c;box-shadow:0 0 0 2px var(--bg)}
+#menuBtn.lost::after{background:#ef8a6d}
+#menuScrim{position:absolute;inset:0;z-index:6;background:rgba(10,8,7,.45);opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s .2s}
+#menu{position:absolute;left:0;top:0;bottom:0;z-index:7;width:min(320px,88%);overflow:auto;touch-action:auto;background:var(--panel);border-right:1px solid var(--line);
+  box-shadow:12px 0 40px rgba(0,0,0,.45);padding:12px 16px 20px;display:flex;flex-direction:column;gap:16px;
+  transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility 0s .22s}
+body.menu #menu{transform:none;visibility:visible;transition:transform .22s ease}
+body.menu #menuScrim{opacity:1;visibility:visible;transition:opacity .2s}
+#menu .mh{display:flex;align-items:center;justify-content:space-between}
+#menuClose{width:44px;padding:0;display:grid;place-items:center;background:none;border-color:transparent}
+#menuClose svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+#menu section{display:flex;flex-direction:column;gap:8px}
+#menu h3{font:600 13px "Barlow Condensed",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);margin:0}
+#menu .mrow{display:flex;gap:8px;align-items:center}
+#menu .mrow button{flex:1;padding:0 8px}
+#menu select{width:100%}
+#menu [disabled]{opacity:.45;cursor:default}
+#menu .tog{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:10px 12px;min-height:0;font-size:16px;line-height:1.2}
+#menu .tog small{display:block;font:400 13px/1.3 Barlow,sans-serif;color:var(--dim);margin-top:3px}
+#menu .tog i{flex:0 0 auto;position:relative;width:34px;height:20px;margin-top:1px;border-radius:10px;background:#0c0a09;border:1px solid #4a4037;transition:background .15s}
+#menu .tog i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dim);transition:transform .15s,background .15s}
+#menu .tog[aria-pressed=true]{color:var(--ink)}
+#menu .tog[aria-pressed=true] i{background:color-mix(in srgb,var(--brass) 35%,#0c0a09);border-color:var(--brass)}
+#menu .tog[aria-pressed=true] i::after{transform:translateX(14px);background:var(--brass)}
+body.notips #hint.tip{display:none}
+@media(prefers-reduced-motion:reduce){#menu,#menuScrim,body.menu #menu,body.menu #menuScrim{transition:none}}
 #tiltBox span{font:600 12px "Barlow Condensed",sans-serif;color:var(--dim);background:rgba(18,16,14,.86);padding:1px 8px;border-radius:10px}
 #spinBall{position:relative;width:96px;height:96px;border-radius:50%;cursor:crosshair;
   background:radial-gradient(circle at 38% 32%,#fff 0,#f1ece2 38%,#cfc6b6 78%,#9d9384 100%);
@@ -64,7 +93,7 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .rb i{position:absolute;inset:4%;border-radius:50%;display:grid;place-items:center}
 .rb b{width:56%;aspect-ratio:1;border-radius:50%;background:#f4f1ea;color:#111;display:grid;place-items:center;font:700 3.4cqw/1 Barlow,sans-serif}
 .rb::after{content:"";position:absolute;inset:4%;border-radius:50%;background:radial-gradient(circle at 36% 30%,rgba(255,255,255,.7) 0,rgba(255,255,255,0) 30%,rgba(0,0,0,0) 55%,rgba(0,0,0,.45) 100%)}
-@media(max-width:600px){#ballRack{order:-1;flex-basis:100%;width:100%}}
+@media(max-width:600px){#ballRack{flex:1 1 140px;width:auto}}
 .card{background:var(--panel);border:1px solid #3d352d;border-radius:12px;padding:26px 30px;text-align:center;max-width:min(420px,90%);box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .card h2{font:700 36px/1.05 "Barlow Condensed",sans-serif;margin:0 0 8px;text-wrap:balance}
 .card p{margin:0 0 10px;color:var(--dim)}
@@ -105,12 +134,12 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .pl i{width:16px;height:16px;border-radius:50%;background:repeating-linear-gradient(90deg,#c4161c 0 50%,#f6c419 50% 100%);box-shadow:inset -2px -2px 3px rgba(0,0,0,.35)}
 .pl small{font:500 13px Barlow,sans-serif;color:var(--dim)}
 .pl .fr{color:var(--brass);font-size:17px}
-.power{display:flex;align-items:center;gap:10px}
+.power{display:flex;align-items:center;gap:10px;flex:0 1 auto}
 .power b{font:600 15px "Barlow Condensed",sans-serif;color:var(--dim)}
 #powerPct{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
 .meter{width:clamp(110px,22vw,220px);height:12px;background:#0c0a09;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#6fae7c,var(--brass),#d2232a)}
-#report{font-size:15px;color:var(--dim)}
+#report{font-size:15px;line-height:1.3;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 160px}
 #lastShot{font:500 14px "Barlow Condensed",sans-serif;color:var(--dim);white-space:nowrap}
 #lastShot.mis{color:#e0704a;font-weight:600}
 #report strong{color:var(--ink);font-weight:500}
@@ -176,26 +205,33 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #fxLine .a{color:#e0a04a}#fxLine .d{color:#6fa8dc}
 @media(max-width:900px){.pu .tx em{display:none}.pu{width:200px}}
 @media(max-width:600px){#puBox{flex-direction:column;bottom:10px;max-width:calc(100% - 190px);gap:5px}.pu{width:auto;padding:5px 7px;gap:6px}.pu .ic{width:26px;height:26px}.pu .ic svg{width:16px;height:16px}.pu .tx b{font-size:15px}.pu button{min-height:32px;padding:0 9px}}
-.vol{display:flex;align-items:center;gap:8px}#volSlider{width:90px;accent-color:var(--brass);cursor:pointer}
-@media(max-width:1360px){h1 span{display:none}}
-@media(max-width:940px){.sel span{display:none}}
-@media(max-width:600px){#volSlider{width:64px}h1{font-size:20px}#turnText{font-size:16px}#hint{font-size:12px}.sel span{display:none}}
+#volSlider{flex:1;accent-color:var(--brass);cursor:pointer}
+/* Small screens: icon-only corner buttons, and a footer that stays one or two slim rows so the table keeps the room */
+@media(max-width:760px){.corner span{display:none}.corner{padding:0;width:44px;justify-content:center}#banner{max-width:calc(100% - 124px);padding:6px 10px}#players{display:none}}
+@media(max-width:600px){#turnText{font-size:16px}#hint{font-size:12px;line-height:1.3}#score{font-size:15px;gap:7px}#score b{font-size:20px}#score .bo{font-size:11px}
+  footer{gap:4px 12px;padding:6px 10px}.power{flex:1 1 150px;gap:7px}.power>b:first-child{display:none}.meter{flex:1;width:auto}#report{flex-basis:100%;font-size:13px;order:3}#lastShot{display:none}}
+@media(max-height:500px){footer{padding-top:5px;padding-bottom:5px}#players{display:none}.corner{top:8px}#menuBtn{left:8px}#viewBtn{right:8px}#banner{top:8px;padding:4px 10px}#hint{font-size:12px;line-height:1.25}#score{padding-bottom:2px;margin-bottom:2px}}
 
 </style>
 </head>
 <body>
-<header>
-  <h1>Pool <span>· prototype</span></h1>
-  <div class="grow"></div>
-  <label class="sel"><span>Rules</span><select id="rulesSel" aria-label="Rules"></select></label>
-  <label class="sel"><span>Table</span><select id="tableSel" aria-label="Table size"></select></label>
-  <button id="viewBtn" aria-pressed="false" title="Look down on the whole table without shooting (T)">Overview</button>
-  <span class="vol"><button id="soundBtn" aria-pressed="true" title="Sound on/off">Sound</button><input id="volSlider" type="range" min="0" max="100" step="1" aria-label="Volume" title="Volume"></span>
-  <button id="onlineBtn" aria-pressed="false" title="Play a friend over the internet">Online</button>
-  <button id="matchBtn" title="Player names, how many frames, and a fresh match">Match</button>
-  <button id="rackBtn">Re-rack</button>
-</header>
 <div id="stage">
+  <button id="menuBtn" class="corner" aria-expanded="false" aria-controls="menu" title="Menu (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menu</span></button>
+  <button id="viewBtn" class="corner" aria-pressed="false" title="Look down on the whole table without shooting (T)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>Overview</span></button>
+  <div id="menuScrim"></div>
+  <aside id="menu" role="dialog" aria-label="Menu">
+    <div class="mh"><h1>Pool</h1><button id="menuClose" aria-label="Close menu" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <section><h3>Game</h3>
+      <div class="mrow"><button id="matchBtn" title="Player names, computer opponents, how many frames, and a fresh match">Match</button><button id="onlineBtn" aria-pressed="false" title="Play a friend over the internet">Online</button><button id="rackBtn" title="Start this frame again">Re-rack</button></div>
+    </section>
+    <section><h3><label for="rulesSel">Rules</label></h3><select id="rulesSel"></select></section>
+    <section><h3><label for="tableSel">Table</label></h3><select id="tableSel"></select></section>
+    <section><h3>Sound</h3><div class="mrow"><button id="soundBtn" aria-pressed="true" title="Sound on/off">Sound</button><input id="volSlider" type="range" min="0" max="100" step="1" aria-label="Volume" title="Volume"></div></section>
+    <section><h3>View</h3>
+      <button class="tog" id="pushBtn" aria-pressed="false"><i></i><span>Push-in<small>Camera eases forward a little as you pull the cue back. Straight in, never turns.</small></span></button>
+      <button class="tog" id="tipsBtn" aria-pressed="true"><i></i><span>Tips<small>How-to-play hints under the score.</small></span></button>
+    </section>
+  </aside>
   <div id="banner"><div id="score" hidden></div><b id="turnText">Player 1 to break</b><span id="fxLine" hidden></span><span id="hint">Move to aim · press and drag back to pull the cue · let go to shoot · ← → fine aim</span></div>
   <div id="puBox" hidden aria-label="Power-ups"></div>
   <div id="spinBox" hidden>
@@ -206,7 +242,6 @@ select:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button id="tiltUp" aria-label="Raise the view (hold, or press the up arrow)" title="Raise the view (↑ or scroll)">▲</button>
     <span>View</span>
     <button id="tiltDown" aria-label="Lower the view (hold, or press the down arrow)" title="Lower the view (↓ or scroll)">▼</button>
-    <button id="pushBtn" aria-pressed="false" title="Camera eases forward a little as you pull the cue back (straight in, never turns)">Push-in</button>
   </div>
   <div id="netCard" hidden><div class="card" role="dialog" aria-labelledby="netTitle">
     <h2 id="netTitle">Play online</h2>
@@ -762,6 +797,8 @@ function updateUI() {
       ? 'Drag the white back into baulk if you want · press anywhere else to get down on the shot'
       : 'Drag the white to place it' + (game.ballInHand === 'baulk' ? ' behind the baulk line' : '') + ' · press anywhere else to get down on the shot';
   else h.hidden = true;
+  // How-to hints can be switched off in the menu; "waiting for…" / "watching…" lines always show
+  h.classList.toggle('tip', !(!net.on && cpuAt(game.turn)) && !(net.on && !myTurn()));
 }
 
 // The scoreboard: names, frames won, the match length, and a dot for each frame
@@ -1533,7 +1570,7 @@ puBox.addEventListener('click', e => {
 puBox.addEventListener('pointerdown', e => e.stopPropagation());
 // Q uses your power-up (playing on one screen: Q for the player at the table, E for the other player)
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('select, input, #netCard, #admin')) return;
+  if (e.target.closest && e.target.closest('select, input, #netCard, #admin, #menu')) return;
   const k = e.key.toLowerCase();
   if (!RULE.powerups || e.repeat || (k !== 'q' && k !== 'e')) return;
   if (net.on) { if (k === 'q') usePowerup(net.me); }
@@ -2259,7 +2296,7 @@ function updateWalls() {
 
 addEventListener('keydown', () => audioInit(), true);
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('select, input, #netCard, #admin')) return;
+  if (e.target.closest && e.target.closest('select, input, #netCard, #admin, #menu')) return;
   if (state !== 'aim' || game.over || !myTurn()) return;
   // T (or the Overview button) toggles the "just looking" top view; Esc also leaves it
   if (e.key === 't' || e.key === 'T' || (looking && e.key === 'Escape')) { setLook(!looking); return; }
@@ -2551,6 +2588,36 @@ function updatePower() {
 }
 
 document.getElementById('rackBtn').addEventListener('click', () => { newFrame(game.breaker); netHostReset(); });
+
+// The slide-out menu (top-left button, or M): everything you don't need mid-shot lives in here
+const menuBtn = document.getElementById('menuBtn'), menuEl = document.getElementById('menu');
+function setMenu(on) {
+  if (on === document.body.classList.contains('menu')) return;
+  document.body.classList.toggle('menu', on);
+  menuBtn.setAttribute('aria-expanded', on);
+  if (on) document.getElementById('menuClose').focus({ preventScroll: true });
+  else if (menuEl.contains(document.activeElement)) menuBtn.focus({ preventScroll: true });
+}
+menuBtn.addEventListener('click', () => { audioInit(); setMenu(true); });
+document.getElementById('menuClose').addEventListener('click', () => setMenu(false));
+document.getElementById('menuScrim').addEventListener('pointerdown', e => { e.preventDefault(); setMenu(false); });
+// Buttons that open a card or reset the frame close the menu behind them
+for (const id of ['matchBtn', 'onlineBtn', 'rackBtn']) document.getElementById(id).addEventListener('click', () => setMenu(false));
+addEventListener('keydown', e => {
+  const on = document.body.classList.contains('menu');
+  if (on && e.key === 'Escape') { e.stopImmediatePropagation(); setMenu(false); return; }
+  if ((e.key === 'm' || e.key === 'M') && !e.repeat && !(e.target.closest && e.target.closest('input, select, textarea, #netCard, #admin, #matchCard'))) setMenu(!on);
+}, true);
+// Tips on/off (remembered in this browser)
+const tipsBtn = document.getElementById('tipsBtn');
+let tipsOn = true;
+try { tipsOn = localStorage.getItem('pool-tips') !== 'off'; } catch (e) {}
+function showTips() { tipsBtn.setAttribute('aria-pressed', tipsOn); document.body.classList.toggle('notips', !tipsOn); }
+showTips();
+tipsBtn.addEventListener('click', () => {
+  tipsOn = !tipsOn; showTips();
+  try { localStorage.setItem('pool-tips', tipsOn ? 'on' : 'off'); } catch (e) {}
+});
 
 // ================================================================
 // 8. CAMERA FIT, DRAWING AND THE MAIN LOOP
@@ -3293,6 +3360,9 @@ function hideCard() { netEl('netCard').hidden = true; syncOnlineBtn(); }
 function syncOnlineBtn() {
   onlineBtn.setAttribute('aria-pressed', net.on);
   onlineBtn.classList.toggle('lost', net.on && !net.connected);
+  // the menu button carries the online dot too, since the Online button lives inside the menu
+  menuBtn.classList.toggle('on', net.on);
+  menuBtn.classList.toggle('lost', net.on && !net.connected);
 }
 function showMenu() {
   netError('');
